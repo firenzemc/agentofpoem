@@ -75,6 +75,18 @@
   .card .meta b { color: var(--ink); font-weight: 600; }
   .poem { white-space: pre-wrap; font-size: 18px; margin: 6px 0 14px; }
   .poem mark { background: var(--hit); padding: 0 2px; border-radius: 3px; }
+  .poem-wrap { position: relative; }
+  .poem-wrap.clamped .poem {
+    max-height: 14.5em; overflow: hidden; margin-bottom: 0;
+  }
+  .poem-wrap.clamped::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 28px; height: 56px;
+    background: linear-gradient(transparent, var(--card)); pointer-events: none;
+  }
+  .unfold {
+    display: block; width: 100%; border: none; background: none; cursor: pointer;
+    color: var(--gold); font-size: 13px; font-family: inherit; padding: 6px 0 2px;
+  }
   .why { font-size: 14px; background: #f4efe6; border-left: 3px solid var(--gold);
     padding: 10px 12px; border-radius: 0 6px 6px 0; }
   .aspects { margin: 8px 0 0; }
@@ -175,6 +187,25 @@ function renderPoem(text, evidence) {
   return html;
 }
 
+// Long poems render clamped with an unfold control (e.g. Dante cantos, 离骚).
+const CLAMP_LINES = 12;
+function poemBlock(text, evidence) {
+  const body = renderPoem(text, evidence);
+  if ((text.match(/\n/g) || []).length + 1 <= CLAMP_LINES) {
+    return `<div class="poem">${body}</div>`;
+  }
+  return `<div class="poem-wrap clamped">
+    <div class="poem">${body}</div>
+    <button class="unfold">展开全文 ▾</button>
+  </div>`;
+}
+document.addEventListener("click", (e) => {
+  if (!e.target.classList.contains("unfold")) return;
+  const wrap = e.target.closest(".poem-wrap");
+  const clamped = wrap.classList.toggle("clamped");
+  e.target.textContent = clamped ? "展开全文 ▾" : "收起 ▴";
+});
+
 const results = [];
 function repaint() {
   results.sort((a, b) => (b.verdict.confidence || 0) - (a.verdict.confidence || 0));
@@ -189,8 +220,8 @@ function repaint() {
     return `<div class="card">
       <span class="conf mono">匹配 ${conf}%</span>
       <div class="meta"><b>${esc(p.title || "无题")}</b> · ${esc(p.author || "佚名")}
-        · ${esc(p.era || "")} · ${esc(p.language)}</div>
-      <div class="poem">${renderPoem(p.full_text, v.evidence_lines)}</div>
+        · ${esc(p.era || "")} · ${esc(LANG_NAMES[p.language] || p.language)}</div>
+      ${poemBlock(p.full_text, v.evidence_lines)}
       <div class="why">${esc(v.explanation)}</div>
       <div class="aspects">${aspects}</div>
       <div class="src mono">src ${src} · license ${esc(p.license)}</div>
@@ -198,10 +229,12 @@ function repaint() {
   }).join("");
 }
 
-let agents = 0, running = 0, done = 0, hits = 0;
+let agents = 0, running = 0, done = 0, hits = 0, stage = 0;
+const STAGE_NAMES = { 1: "初筛", 2: "精读" };
 function updateStat() {
+  const label = STAGE_NAMES[stage] ? `${STAGE_NAMES[stage]} · ` : "";
   $("stat").innerHTML =
-    `<b>${agents}</b> agents · ${running} running · ${done} done · <b>${hits}</b> 命中`;
+    `${label}<b>${agents}</b> agents · ${running} running · ${done} done · <b>${hits}</b> 命中`;
   $("prog").style.width = (agents ? (done / agents * 100) : 0) + "%";
 }
 
@@ -229,11 +262,12 @@ function start() {
         $("stage").textContent += `　▸ 粗筛 ${m.count} 首`;
         break;
       case "swarm_dispatched": {
-        agents = m.agents;
+        stage = m.stage; agents = m.agents; running = 0; done = 0;
         let tiles = "";
         for (let i = 0; i < agents; i++) tiles += `<div class="agent" id="a${i}"></div>`;
         $("swarm").innerHTML = tiles;
-        $("stage").textContent = `派出 ${agents} 个 agent，每个审读 ${m.batch_size} 首`;
+        const verb = m.stage === 1 ? "初筛扫描" : "精读全文";
+        $("stage").textContent = `第${m.stage}波：${m.agents} 个 agent ${verb}，每个 ${m.batch_size} 首`;
         updateStat();
         break;
       }
@@ -243,6 +277,9 @@ function start() {
         updateStat();
         break;
       }
+      case "shortlist":
+        $("stage").textContent = `初筛完成 · 入围 ${m.count} 首进入精读`;
+        break;
       case "verdict":
         hits++;
         results.push({ verdict: m.verdict, poem: m.poem });
@@ -255,11 +292,15 @@ function start() {
         updateStat();
         break;
       }
-      case "done":
-        $("stage").textContent = `完成 · 命中 ${m.matched} 首`;
+      case "done": {
+        const u = m.usage || {};
+        const tok = u.prompt ? ` · ${((u.prompt + (u.completion || 0)) / 1000).toFixed(1)}k tok` +
+          (u.cache_hit ? `（缓存命中 ${(u.cache_hit / 1000).toFixed(1)}k）` : "") : "";
+        $("stage").textContent = `完成 · 命中 ${m.matched} 首${tok}`;
         if (!results.length) $("results").innerHTML = '<div class="empty">没有找到匹配的诗，换个描述试试。</div>';
         es.close(); $("go").disabled = false;
         break;
+      }
       case "error":
         $("stage").textContent += `　[err:${m.stage || ""}] ${m.message}`;
         break;
@@ -272,7 +313,8 @@ $("go").onclick = start;
 $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
 
 /* ── browse view ── */
-const LANG_NAMES = { zh: "中文", en: "English", ja: "日本語", fr: "Français", de: "Deutsch" };
+const LANG_NAMES = { zh: "中文", en: "English", ja: "日本語", fr: "Français",
+  de: "Deutsch", es: "Español", it: "Italiano" };
 const browse = { language: "", author: "", page: 1, langs: [] };
 
 function showView(name) {
@@ -302,7 +344,7 @@ function poemCard(p) {
   return `<div class="card">
     <div class="meta"><b>${esc(p.title || "无题")}</b> · ${esc(p.author || "佚名")}
       · ${esc(p.era || "")} · ${esc(LANG_NAMES[p.language] || p.language)}</div>
-    <div class="poem">${esc(p.full_text)}</div>
+    ${poemBlock(p.full_text, [])}
     <div class="src mono">src ${src} · license ${esc(p.license)}</div>
   </div>`;
 }

@@ -24,6 +24,15 @@ Respond ONLY with a JSON object with exactly these keys:
 
 Do not add extra keys. Do not translate the user's words into the poem; just analyze."""
 
+SCOUT_SYS = """You are a scout agent in a poetry search swarm. You receive compact \
+digests of poems (id | language | author | title | opening lines) followed by a \
+user's description. Pick the poems that plausibly match the description by meaning, \
+imagery, or mood — across languages. Be inclusive: a later stage reads the full \
+texts and judges strictly; your job is recall, not precision.
+
+Respond ONLY with JSON: {"candidates": [{"poem_id": "...", "score": 0.0}]}
+score is 0.0–1.0 plausibility. Include only plausible poems (empty array if none)."""
+
 MATCH_SYS = """You are one agent in a swarm that judges whether candidate poems match \
 a user's description.
 
@@ -53,9 +62,48 @@ def _format_poem(p: Poem) -> str:
     return head + "\n" + p.full_text
 
 
-async def understand_query(client: AsyncOpenAI, settings: Settings, description: str) -> dict:
+def _digest(p: Poem) -> str:
+    opening = " / ".join(p.full_text.splitlines()[:2])[:80]
+    return f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | {opening}"
+
+
+async def understand_query(
+    client: AsyncOpenAI, settings: Settings, description: str, usage: dict | None = None
+) -> dict:
     user = f"User description:\n{description}"
-    return await chat_json(client, settings.deepseek_model, UNDERSTAND_SYS, user, max_tokens=600)
+    return await chat_json(
+        client, settings.deepseek_model, UNDERSTAND_SYS, user, max_tokens=600, usage=usage
+    )
+
+
+async def scout_batch(
+    client: AsyncOpenAI,
+    settings: Settings,
+    description: str,
+    batch: list[Poem],
+    usage: dict | None = None,
+) -> list[tuple[str, float]]:
+    """Stage-1 scan over compact digests; returns (poem_id, score) candidates.
+
+    The static digest block comes FIRST and the query LAST: chunks are stable
+    across queries, so DeepSeek's automatic prefix caching makes repeat scans
+    of the same chunk ~10x cheaper on input tokens.
+    """
+    digests = "\n".join(_digest(p) for p in batch)
+    user = f"Poem digests:\n{digests}\n\nUser description:\n{description}"
+    data = await chat_json(
+        client, settings.deepseek_model, SCOUT_SYS, user, max_tokens=1500, usage=usage
+    )
+    ids = {p.id for p in batch}
+    out: list[tuple[str, float]] = []
+    for c in data.get("candidates", []):
+        pid = c.get("poem_id")
+        if pid in ids:
+            try:
+                out.append((pid, float(c.get("score", 0.5))))
+            except (TypeError, ValueError):
+                out.append((pid, 0.5))
+    return out
 
 
 async def match_batch(
@@ -64,14 +112,17 @@ async def match_batch(
     description: str,
     query_lang: str,
     batch: list[Poem],
+    usage: dict | None = None,
 ) -> list[Verdict]:
     poems_blob = "\n\n---\n\n".join(_format_poem(p) for p in batch)
     user = (
+        f"Candidate poems (judge each; keep original language):\n\n{poems_blob}\n\n"
         f"query_lang: {query_lang}\n"
-        f"User description:\n{description}\n\n"
-        f"Candidate poems (judge each; keep original language):\n\n{poems_blob}"
+        f"User description:\n{description}"
     )
-    data = await chat_json(client, settings.deepseek_model, MATCH_SYS, user, max_tokens=2500)
+    data = await chat_json(
+        client, settings.deepseek_model, MATCH_SYS, user, max_tokens=2500, usage=usage
+    )
     verdicts: list[Verdict] = []
     for raw in data.get("verdicts", []):
         try:
@@ -81,6 +132,39 @@ async def match_batch(
     return verdicts
 
 
+def _chunk(items: list, size: int, max_chunks: int) -> list[list]:
+    size = max(size, -(-len(items) // max_chunks))
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+async def _run_stage(
+    stage: int,
+    batches: list[list[Poem]],
+    worker,
+    concurrency: int,
+) -> AsyncIterator[dict]:
+    """Run one swarm wave; yields agent_start/agent_done (+ worker events)."""
+    sem = asyncio.Semaphore(concurrency)
+    queue: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def run_agent(idx: int, batch: list[Poem]) -> None:
+        async with sem:
+            await queue.put(
+                {"type": "agent_start", "stage": stage, "agent": idx, "size": len(batch)}
+            )
+            hits = await worker(idx, batch, queue)
+            await queue.put({"type": "agent_done", "stage": stage, "agent": idx, "hits": hits})
+
+    tasks = [asyncio.create_task(run_agent(i, b)) for i, b in enumerate(batches)]
+    finished = 0
+    while finished < len(batches):
+        event = await queue.get()
+        if event["type"] == "agent_done":
+            finished += 1
+        yield event
+    await asyncio.gather(*tasks)
+
+
 async def search_stream(
     client: AsyncOpenAI,
     settings: Settings,
@@ -88,19 +172,21 @@ async def search_stream(
     poems: list[Poem],
     description: str,
 ) -> AsyncIterator[dict]:
-    """Run the full query pipeline, yielding progress events for SSE.
+    """Run the two-stage query pipeline, yielding progress events for SSE.
 
-    Event types: start, understanding, candidates, swarm_dispatched, agent_start,
-    verdict, agent_done, done, error.
+    Stage 1 (scouts): bounded swarm scans compact digests of every candidate
+    and shortlists plausible poems — cheap tokens, prefix-cache friendly.
+    Stage 2 (judges): swarm reads the full text of the shortlist and produces
+    verdicts with verbatim evidence. Small corpora skip straight to stage 2.
 
-    Each agent reads a small batch of candidates. Events are streamed through a
-    queue as agents begin and finish, so the UI can render the live swarm —
-    dozens to hundreds of agents lighting up and result cards arriving one by one.
+    Event types: start, understanding, candidates, swarm_dispatched(stage),
+    agent_start(stage), agent_done(stage), shortlist, verdict, done, error.
     """
     yield {"type": "start", "description": description}
+    usage: dict = {}
 
     try:
-        intent = await understand_query(client, settings, description)
+        intent = await understand_query(client, settings, description, usage)
     except Exception as e:
         yield {"type": "error", "stage": "understanding", "message": str(e)}
         intent = {"intent_summary": description, "query_lang": "", "lang_hint": None}
@@ -113,49 +199,71 @@ async def search_stream(
         yield {"type": "done", "matched": 0}
         return
 
-    # Grow the per-agent batch when needed so the agent count stays bounded
-    # (≤ swarm_max_agents) however large the candidate set gets.
-    bs = max(settings.swarm_batch_size, -(-len(candidates) // settings.swarm_max_agents))
-    batches = [candidates[i : i + bs] for i in range(0, len(candidates), bs)]
     by_id = {p.id: p for p in candidates}
-    sem = asyncio.Semaphore(settings.swarm_concurrency)
-    queue: asyncio.Queue[dict] = asyncio.Queue()
 
-    yield {"type": "swarm_dispatched", "agents": len(batches), "batch_size": bs}
+    if len(candidates) > settings.shortlist_size:
+        scout_batches = _chunk(candidates, settings.scout_batch_size, settings.swarm_max_agents)
+        yield {
+            "type": "swarm_dispatched",
+            "stage": 1,
+            "agents": len(scout_batches),
+            "batch_size": len(scout_batches[0]),
+        }
 
-    async def run_agent(idx: int, batch: list[Poem]) -> None:
-        async with sem:
-            await queue.put({"type": "agent_start", "agent": idx, "size": len(batch)})
+        scored: list[tuple[str, float]] = []
+
+        async def scout_worker(idx: int, batch: list[Poem], queue: asyncio.Queue) -> int:
             try:
-                verdicts = await match_batch(client, settings, description, query_lang, batch)
+                found = await scout_batch(client, settings, description, batch, usage)
             except Exception:
-                verdicts = []
-            hits = 0
-            for v in verdicts:
-                if v.match and v.poem_id in by_id:
-                    hits += 1
-                    await queue.put(
-                        {
-                            "type": "verdict",
-                            "agent": idx,
-                            "verdict": v.model_dump(),
-                            "poem": by_id[v.poem_id].model_dump(),
-                        }
-                    )
-            await queue.put({"type": "agent_done", "agent": idx, "hits": hits})
+                found = []
+            scored.extend(found)
+            return len(found)
 
-    tasks = [asyncio.create_task(run_agent(i, b)) for i, b in enumerate(batches)]
+        async for event in _run_stage(1, scout_batches, scout_worker, settings.swarm_concurrency):
+            yield event
+
+        scored.sort(key=lambda t: -t[1])
+        shortlist = [by_id[pid] for pid, _ in scored[: settings.shortlist_size]]
+        yield {"type": "shortlist", "count": len(shortlist)}
+        if not shortlist:
+            yield {"type": "done", "matched": 0}
+            return
+    else:
+        shortlist = candidates
+
+    judge_batches = _chunk(shortlist, settings.swarm_batch_size, settings.swarm_max_agents)
+    yield {
+        "type": "swarm_dispatched",
+        "stage": 2,
+        "agents": len(judge_batches),
+        "batch_size": len(judge_batches[0]),
+    }
 
     matched = 0
-    finished = 0
-    total = len(batches)
-    while finished < total:
-        event = await queue.get()
-        if event["type"] == "verdict":
-            matched += 1
-        elif event["type"] == "agent_done":
-            finished += 1
+
+    async def judge_worker(idx: int, batch: list[Poem], queue: asyncio.Queue) -> int:
+        nonlocal matched
+        try:
+            verdicts = await match_batch(client, settings, description, query_lang, batch, usage)
+        except Exception:
+            verdicts = []
+        hits = 0
+        for v in verdicts:
+            if v.match and v.poem_id in by_id:
+                hits += 1
+                matched += 1
+                await queue.put(
+                    {
+                        "type": "verdict",
+                        "agent": idx,
+                        "verdict": v.model_dump(),
+                        "poem": by_id[v.poem_id].model_dump(),
+                    }
+                )
+        return hits
+
+    async for event in _run_stage(2, judge_batches, judge_worker, settings.swarm_concurrency):
         yield event
 
-    await asyncio.gather(*tasks)
-    yield {"type": "done", "matched": matched}
+    yield {"type": "done", "matched": matched, "usage": usage}
