@@ -261,22 +261,29 @@ project or the user says otherwise.
 
 ## Project-specific
 
-<!-- Fill this in on first run. Keep it tight. -->
-
 ### What this is
-(one paragraph)
+PoemFerry (诗渡) — multilingual public-domain poetry semantic search. Users
+describe a poem in any language; a swarm of cheap LLM agents (DeepSeek
+v4-flash) judges candidates and explains how each poem matches, streaming
+results over SSE. Poems are served only in their original language, never
+translated. Full architecture: see the plan doc referenced in git history.
 
 ### Stack
-- Language / runtime:
-- Framework:
-- Key libraries:
+- Language / runtime: Python 3.11+ (uv)
+- Framework: FastAPI + uvicorn; vanilla JS/SSE frontend in poemferry/static
+- Key libraries: openai SDK (pointed at DeepSeek official API)
 
 ### Commands
-- Install:
-- Dev:
-- Test:
-- Lint:
-- Typecheck:
+- Install: `uv sync`
+- Dev: `uv run uvicorn poemferry.app:app --reload`
+- Test: `uv run pytest`
+- Lint: `uv run ruff check poemferry scripts tests`
+- Deploy: `docker compose up -d --build` (OrbStack; host port 8077, reachable via tailnet IP)
 
 ### Things to know
--
+- Corpus lives in `data/*.jsonl`, one file per source; rebuild with `scripts/ingest_*.py`.
+  Every poem carries source_name/source_url/license — public-domain only, no NC sources.
+- Swarm tuning via env: SWARM_BATCH_SIZE, SWARM_CONCURRENCY (hard cap 64),
+  SWARM_MAX_AGENTS (batch grows so agent count stays bounded).
+- `.env` holds the DeepSeek key (gitignored); `.env.example` is the template.
+- Agents must never translate poems; explanations are written in the query language.
