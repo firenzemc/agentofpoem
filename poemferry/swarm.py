@@ -20,6 +20,8 @@ Respond ONLY with a JSON object with exactly these keys:
 - emotion: array of short strings (emotions/mood)
 - setting: array of short strings (time, place, situation)
 - has_fragment: boolean — true if they quoted or remembered an actual line
+- fragments: array of the verbatim lines/phrases the user quoted or half-remembers
+  from the poem itself (copy them exactly as written; empty array if none)
 - lang_hint: array of language codes to restrict the search to, or null for any language
 
 Do not add extra keys. Do not translate the user's words into the poem; just analyze."""
@@ -63,6 +65,15 @@ def _format_poem(p: Poem) -> str:
 
 
 def _digest(p: Poem) -> str:
+    # With a whole-poem gist available, one opening line suffices; the gist
+    # is what lets scouts see content from a long poem's later sections.
+    gist = (p.enrichment or {}).get("gist")
+    if gist:
+        opening = (p.full_text.splitlines() or [""])[0][:40]
+        return (
+            f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | "
+            f"{opening} | gist: {gist}"
+        )
     opening = " / ".join(p.full_text.splitlines()[:2])[:80]
     return f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | {opening}"
 
@@ -171,6 +182,7 @@ async def search_stream(
     retriever: Retriever,
     poems: list[Poem],
     description: str,
+    fragment_index=None,
 ) -> AsyncIterator[dict]:
     """Run the two-stage query pipeline, yielding progress events for SSE.
 
@@ -201,6 +213,18 @@ async def search_stream(
 
     by_id = {p.id: p for p in candidates}
 
+    # Exact-fragment channel: user-quoted lines are matched verbatim against
+    # the whole corpus (normalized, trad→simp folded) and go straight to the
+    # judges — immune to scout misses on long poems' later sections.
+    forced: list[Poem] = []
+    fragments = intent.get("fragments") or []
+    if fragment_index is not None and fragments:
+        hit_ids = set(fragment_index.find(fragments))
+        forced = [p for p in candidates if p.id in hit_ids]
+        if forced:
+            yield {"type": "fragment_hits", "count": len(forced)}
+    forced_ids = {p.id for p in forced}
+
     if len(candidates) > settings.shortlist_size:
         scout_batches = _chunk(candidates, settings.scout_batch_size, settings.swarm_max_agents)
         yield {
@@ -224,7 +248,12 @@ async def search_stream(
             yield event
 
         scored.sort(key=lambda t: -t[1])
-        shortlist = [by_id[pid] for pid, _ in scored[: settings.shortlist_size]]
+        scouted = [
+            by_id[pid]
+            for pid, _ in scored[: settings.shortlist_size]
+            if pid not in forced_ids
+        ]
+        shortlist = forced + scouted
         yield {"type": "shortlist", "count": len(shortlist)}
         if not shortlist:
             yield {"type": "done", "matched": 0}

@@ -277,6 +277,9 @@ function start() {
         updateStat();
         break;
       }
+      case "fragment_hits":
+        $("stage").textContent = `原句精确命中 ${m.count} 首（直通精读）`;
+        break;
       case "shortlist":
         $("stage").textContent = `初筛完成 · 入围 ${m.count} 首进入精读`;
         break;

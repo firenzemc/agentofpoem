@@ -97,3 +97,38 @@ async def test_large_corpus_runs_scout_then_judge(monkeypatch):
     verdicts = [e for e in events if e["type"] == "verdict"]
     assert [v["poem"]["id"] for v in verdicts] == ["p1"]
     assert types[-1] == "done"
+
+
+def test_digest_includes_gist_when_enriched():
+    enriched = POEMS[0].model_copy(
+        update={"enrichment": {"themes": ["moon"], "gist": "moonlight homesickness at night"}}
+    )
+    d = swarm._digest(enriched)
+    assert "gist: moonlight homesickness at night" in d
+    # Un-enriched poems keep the two-line opening digest.
+    assert "gist:" not in swarm._digest(POEMS[1])
+
+
+async def test_fragment_hits_bypass_scout_misses(monkeypatch):
+    from poemferry.fragments import FragmentIndex
+
+    async def scout_misses_everything(client, settings, description, batch, usage=None):
+        return []
+
+    async def understand_with_fragment(client, settings, description, usage=None):
+        return {"intent_summary": "moon", "query_lang": "zh",
+                "fragments": ["床前明月光"], "lang_hint": None}
+
+    monkeypatch.setattr(swarm, "understand_query", understand_with_fragment)
+    monkeypatch.setattr(swarm, "scout_batch", scout_misses_everything)
+    monkeypatch.setattr(swarm, "match_batch", fake_match)
+
+    settings = make_settings(shortlist_size=2)  # forces stage 1, which finds nothing
+    index = FragmentIndex(POEMS)
+    events = [e async for e in swarm.search_stream(
+        None, settings, NaiveRetriever(), POEMS, "我记得一句床前明月光", fragment_index=index)]
+
+    assert any(e["type"] == "fragment_hits" and e["count"] == 1 for e in events)
+    # Despite scouts returning nothing, the quoted poem reached the judges.
+    verdicts = [e for e in events if e["type"] == "verdict"]
+    assert [v["poem"]["id"] for v in verdicts] == ["p1"]

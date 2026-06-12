@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from .config import load_settings
 from .corpus import load_poems
+from .fragments import FragmentIndex
 from .llm import make_client
 from .retriever import NaiveRetriever
 from .swarm import search_stream
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
     app.state.client = make_client(settings)
     app.state.poems = load_poems(settings.poems_path)
     app.state.retriever = NaiveRetriever()
+    app.state.fragment_index = FragmentIndex(app.state.poems)
     yield
 
 
@@ -78,6 +80,7 @@ async def search(q: str = Query(..., min_length=1)) -> StreamingResponse:
             app.state.retriever,
             app.state.poems,
             q,
+            fragment_index=app.state.fragment_index,
         )
         async for event in stream:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

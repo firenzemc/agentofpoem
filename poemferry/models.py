@@ -11,6 +11,9 @@ class Poem(BaseModel):
     source_name: str
     source_url: str | None = None
     license: str
+    # Offline enrichment-swarm output: {"themes": [...], "gist": "..."} —
+    # a whole-poem English summary so scouts can see past the opening lines.
+    enrichment: dict | None = None
 
 
 class Verdict(BaseModel):
