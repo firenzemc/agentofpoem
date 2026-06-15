@@ -22,3 +22,6 @@ __pycache__/
 # Editors
 .vscode/
 .idea/
+
+# built embedding indices (rebuild via scripts/build_embeddings.py)
+data/*.npz

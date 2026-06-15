@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
 
 from .config import Settings
-from .llm import chat_json
+from .llm import chat_json, swarm_model
 from .models import Poem, Verdict
 from .retriever import Retriever
 
@@ -75,7 +75,7 @@ async def understand_query(
 ) -> dict:
     user = f"User description:\n{description}"
     return await chat_json(
-        client, settings.deepseek_model, UNDERSTAND_SYS, user, max_tokens=900, usage=usage
+        client, swarm_model(settings), UNDERSTAND_SYS, user, max_tokens=900, usage=usage
     )
 
 
@@ -89,7 +89,7 @@ async def scout_batch(
     digests = "\n".join(_digest(p) for p in batch)
     user = f"Poem digests:\n{digests}\n\nUser description:\n{description}"
     data = await chat_json(
-        client, settings.deepseek_model, SCOUT_SYS, user, max_tokens=1500, usage=usage
+        client, swarm_model(settings), SCOUT_SYS, user, max_tokens=1500, usage=usage
     )
     ids = {p.id for p in batch}
     out: list[tuple[str, float]] = []
@@ -118,7 +118,7 @@ async def expert_batch(
         f"Candidate poems (keep original language):\n\n{poems_blob}"
     )
     data = await chat_json(
-        client, settings.deepseek_model, EXPERT_SYS, user, max_tokens=2000, usage=usage
+        client, swarm_model(settings), EXPERT_SYS, user, max_tokens=2000, usage=usage
     )
     ids = {p.id for p in batch}
     hits: dict[str, dict] = {}
@@ -182,22 +182,53 @@ def _chunk(items: list, size: int, max_chunks: int) -> list[list]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
-async def _retrieve(
-    client, settings, intent, candidates, by_id, vector_index, usage, emit
-) -> list[Poem]:
-    """Layer 1: narrow candidates to ~vec_topk. Vector mode embeds the English
-    intent and ranks by cosine; scout mode falls back to a digest-reading swarm."""
-    query_text = intent.get("intent_summary") or ""
-    use_vector = settings.retrieval_mode == "vector" and vector_index is not None and query_text
-    if use_vector:
-        from .vectors import embed_query
+def _merge_scores(*ranked_lists) -> list[str]:
+    """Round-robin interleave of ranked id lists, deduped. Rank-based (not raw
+    score) so channels on different scales — cosine vs idf sums — contribute
+    equally: each channel's #1 first, then every #2, and so on."""
+    from itertools import zip_longest
 
-        try:
-            qvec = await asyncio.to_thread(embed_query, settings, query_text)
-            ranked = vector_index.search(qvec, settings.vec_topk)
-            return [by_id[pid] for pid, _ in ranked if pid in by_id]
-        except Exception as e:
-            await emit({"type": "error", "stage": "retrieve", "message": str(e)})
+    out: list[str] = []
+    seen: set[str] = set()
+    cols = [[pid for pid, _ in lst] for lst in ranked_lists]
+    for tier in zip_longest(*cols):
+        for pid in tier:
+            if pid and pid not in seen:
+                seen.add(pid)
+                out.append(pid)
+    return out
+
+
+async def _retrieve(
+    client, settings, intent, description, candidates, by_id,
+    doc_index, line_index, lexical_index, mode, usage, emit,
+) -> list[Poem]:
+    """Layer 1 — narrow candidates to ~vec_topk. Modes:
+    - image:   doc index (gist+themes+images) ranked by the English intent (semantic, cross-lingual).
+    - line:    line index ranked by the raw query (line-level semantic, same-language imagery).
+    - keyword: lexical term-overlap on raw text (judgment-free detail, same-language).
+    - hybrid:  union of image + line + keyword.
+    - scout:   LLM digest swarm fallback (no embeddings)."""
+    from .vectors import embed_query
+
+    intent_text = intent.get("intent_summary") or description
+    k = settings.vec_topk
+    try:
+        doc_hits = line_hits = lex_hits = []
+        if mode in ("image", "hybrid") and doc_index is not None:
+            dvec = await asyncio.to_thread(embed_query, settings, intent_text)
+            doc_hits = doc_index.search_unique(dvec, k)
+        if mode in ("line", "hybrid") and line_index is not None:
+            lvec = await asyncio.to_thread(embed_query, settings, description)
+            line_hits = line_index.search_unique(lvec, k)
+        if mode in ("keyword", "hybrid") and lexical_index is not None:
+            lex_hits = lexical_index.search(description, k)
+        if doc_hits or line_hits or lex_hits:
+            ids = _merge_scores(doc_hits, line_hits, lex_hits)
+            return [by_id[pid] for pid in ids if pid in by_id][:k]
+    except Exception as e:
+        await emit({"type": "error", "stage": "retrieve", "message": str(e)})
+
     # scout fallback
     scout_batches = _chunk(candidates, settings.scout_batch_size, settings.swarm_max_agents)
     await emit({"type": "swarm_dispatched", "stage": 1, "agents": len(scout_batches),
@@ -209,7 +240,7 @@ async def _retrieve(
         async with sem:
             await emit({"type": "agent_start", "stage": 1, "agent": idx, "size": len(batch)})
             try:
-                found = await scout_batch(client, settings, query_text, batch, usage)
+                found = await scout_batch(client, settings, intent_text, batch, usage)
             except Exception:
                 found = []
             scored.extend(found)
@@ -217,7 +248,7 @@ async def _retrieve(
 
     await asyncio.gather(*(run(i, b) for i, b in enumerate(scout_batches)))
     scored.sort(key=lambda t: -t[1])
-    return [by_id[pid] for pid, _ in scored[: settings.vec_topk] if pid in by_id]
+    return [by_id[pid] for pid, _ in scored[:k] if pid in by_id]
 
 
 async def search_stream(
@@ -227,14 +258,19 @@ async def search_stream(
     poems: list[Poem],
     description: str,
     fragment_index=None,
-    vector_index=None,
+    doc_index=None,
+    line_index=None,
+    lexical_index=None,
+    retrieval_mode: str | None = None,
 ) -> AsyncIterator[dict]:
-    """Funnel pipeline: retrieve (vector/scout) → trim → dynamic expert swarm →
-    aggregate. Streams events for the live UI.
+    """Funnel pipeline: retrieve (image/line/hybrid/scout) → trim → dynamic expert
+    swarm → aggregate. Streams events for the live UI.
 
-    Events: start, understanding, criteria, candidates, retrieved, fragment_hits,
-    shortlist, swarm_dispatched(stage=2), agent_start, agent_done, verdict, done, error.
+    Events: start, understanding, criteria, candidates, retrieved(ids), fragment_hits,
+    shortlist(cards), swarm_dispatched(stage=2), agent_start, expert_hit, agent_done,
+    verdict, done, error.
     """
+    mode = retrieval_mode or settings.retrieval_mode
     queue: asyncio.Queue[dict] = asyncio.Queue()
 
     async def emit(ev: dict) -> None:
@@ -264,9 +300,11 @@ async def search_stream(
             return
 
         retrieved = await _retrieve(
-            client, settings, intent, candidates, by_id, vector_index, usage, emit
+            client, settings, intent, description, candidates, by_id,
+            doc_index, line_index, lexical_index, mode, usage, emit,
         )
-        await emit({"type": "retrieved", "count": len(retrieved)})
+        await emit({"type": "retrieved", "count": len(retrieved), "mode": mode,
+                    "ids": [p.id for p in retrieved]})
 
         # Exact-fragment channel: quoted lines go straight in, ahead of vector hits.
         forced: list[Poem] = []

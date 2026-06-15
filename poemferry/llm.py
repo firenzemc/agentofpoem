@@ -6,10 +6,16 @@ from .config import Settings
 
 
 def make_client(settings: Settings) -> AsyncOpenAI:
-    return AsyncOpenAI(
-        api_key=settings.deepseek_api_key,
-        base_url=settings.deepseek_base_url,
-    )
+    """Client + model for the swarm, picked by SWARM_PROVIDER (deepseek|glm)."""
+    if settings.swarm_provider == "glm" and settings.glm_api_key:
+        return AsyncOpenAI(api_key=settings.glm_api_key, base_url=settings.glm_base_url)
+    return AsyncOpenAI(api_key=settings.deepseek_api_key, base_url=settings.deepseek_base_url)
+
+
+def swarm_model(settings: Settings) -> str:
+    if settings.swarm_provider == "glm" and settings.glm_api_key:
+        return settings.glm_model
+    return settings.deepseek_model
 
 
 async def chat_json(

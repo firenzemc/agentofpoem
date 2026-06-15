@@ -8,12 +8,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from .config import load_settings
 from .corpus import load_poems
 from .fragments import FragmentIndex
+from .lexical import LexicalIndex
 from .llm import make_client
 from .retriever import NaiveRetriever
 from .swarm import search_stream
-from .vectors import VectorIndex
+from .vectors import DOC_FILE, LINE_FILE, VectorIndex
 
 STATIC_DIR = Path(__file__).parent / "static"
+RETRIEVAL_MODES = {"image", "line", "keyword", "hybrid", "scout"}
 
 
 @asynccontextmanager
@@ -24,7 +26,9 @@ async def lifespan(app: FastAPI):
     app.state.poems = load_poems(settings.poems_path)
     app.state.retriever = NaiveRetriever()
     app.state.fragment_index = FragmentIndex(app.state.poems)
-    app.state.vector_index = VectorIndex.load() if settings.retrieval_mode == "vector" else None
+    app.state.doc_index = VectorIndex.load(DOC_FILE)
+    app.state.line_index = VectorIndex.load(LINE_FILE)
+    app.state.lexical_index = LexicalIndex(app.state.poems)
     yield
 
 
@@ -44,9 +48,18 @@ async def info() -> dict:
         "model": s.deepseek_model,
         "has_key": bool(s.deepseek_api_key),
         "languages": sorted({p.language for p in app.state.poems}),
-        "retrieval": s.retrieval_mode if app.state.vector_index else "scout",
-        "indexed": len(app.state.vector_index.ids) if app.state.vector_index else 0,
+        "retrieval": s.retrieval_mode,
+        "modes": sorted(RETRIEVAL_MODES),
+        "doc_indexed": len(app.state.doc_index.ids) if app.state.doc_index else 0,
+        "line_vectors": len(app.state.line_index.ids) if app.state.line_index else 0,
     }
+
+
+@app.get("/api/corpus")
+async def corpus() -> dict:
+    """Ordered poem ids + language, for the funnel dot-grid visualization."""
+    return {"ids": [p.id for p in app.state.poems],
+            "langs": [p.language for p in app.state.poems]}
 
 
 @app.get("/api/browse")
@@ -75,24 +88,13 @@ async def browse(
     }
 
 
-@app.get("/api/sample")
-async def sample(n: int = Query(240, ge=1, le=800)) -> dict:
-    """Poem lines for the digital-rain animation. Deterministic stride sample
-    across the corpus (no RNG needed) for language variety."""
-    poems = app.state.poems
-    step = max(1, len(poems) // n)
-    lines: list[str] = []
-    for p in poems[::step]:
-        for ln in p.full_text.splitlines():
-            ln = ln.strip()
-            if 2 <= len(ln) <= 32:
-                lines.append(ln)
-                break
-    return {"lines": lines[:n]}
-
-
 @app.get("/api/search")
-async def search(q: str = Query(..., min_length=1)) -> StreamingResponse:
+async def search(
+    q: str = Query(..., min_length=1),
+    retrieval: str | None = Query(None),
+) -> StreamingResponse:
+    mode = retrieval if retrieval in RETRIEVAL_MODES else None
+
     async def event_gen():
         stream = search_stream(
             app.state.client,
@@ -101,7 +103,10 @@ async def search(q: str = Query(..., min_length=1)) -> StreamingResponse:
             app.state.poems,
             q,
             fragment_index=app.state.fragment_index,
-            vector_index=app.state.vector_index,
+            doc_index=app.state.doc_index,
+            line_index=app.state.line_index,
+            lexical_index=app.state.lexical_index,
+            retrieval_mode=mode,
         )
         async for event in stream:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

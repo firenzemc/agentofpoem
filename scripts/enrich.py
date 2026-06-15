@@ -28,11 +28,14 @@ WHOLE poem — themes and scenes from its middle and ending matter as much as it
 opening (a searcher may only remember a later passage).
 
 Respond ONLY with JSON:
-{"themes": ["..."], "gist": "..."}
-- themes: 3-6 short English keywords/phrases
-- gist: at most 25 English words summarizing the full arc of the poem, including
-  distinctive later images, scenes, or famous lines (paraphrased in English).
-Never include the original text; never translate lines verbatim; summarize."""
+{"themes": ["..."], "gist": "...", "images": ["..."]}
+- themes: 3-6 short English keywords/phrases for the poem's subject and mood
+- gist: at most 25 English words summarizing the full arc of the poem
+- images: 3-8 English phrases naming the CONCRETE images, scenes, objects, and
+  actions that actually appear ANYWHERE in the poem — including striking but
+  incidental ones (e.g. a famous opening line whose image is not the poem's main
+  theme). This is for search: a reader may recall a vivid image, not the theme.
+Never include the original text; never translate lines verbatim; describe in English."""
 
 
 async def enrich_one(client, settings, sem, record: dict, usage: dict) -> None:
@@ -57,12 +60,14 @@ async def enrich_one(client, settings, sem, record: dict, usage: dict) -> None:
             record["enrichment"] = {
                 "themes": [str(t) for t in data.get("themes", [])][:6],
                 "gist": gist[:300],
+                "images": [str(x) for x in data.get("images", [])][:8],
             }
 
 
 async def enrich_file(client, settings, path: Path) -> None:
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-    todo = [r for r in records if not r.get("enrichment")]
+    # Re-enrich anything missing the images field (added after the first pass).
+    todo = [r for r in records if not (r.get("enrichment") or {}).get("images")]
     if not todo:
         print(f"{path.name}: all {len(records)} already enriched")
         return

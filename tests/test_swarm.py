@@ -12,8 +12,10 @@ def make_settings(**overrides) -> Settings:
         deepseek_api_key="test", deepseek_base_url="https://example.invalid",
         deepseek_model="deepseek-v4-flash", swarm_batch_size=2, swarm_concurrency=4,
         swarm_max_agents=128, scout_batch_size=2, shortlist_size=10, poems_path="data",
-        retrieval_mode="vector", embed_base_url="https://example.invalid", embed_api_key="k",
+        retrieval_mode="image", embed_base_url="https://example.invalid", embed_api_key="k",
         embed_model="embed-v-4-0", vec_topk=10, trim_topn=10, expert_batch=2,
+        swarm_provider="deepseek", glm_base_url="https://example.invalid", glm_api_key="",
+        glm_model="glm-4.7-flash",
     )
     base.update(overrides)
     return Settings(**base)
@@ -74,7 +76,7 @@ def test_vector_index_cosine_topk():
     ids = ["a", "b", "c"]
     mat = np.array([[1, 0], [0, 1], [0.7071, 0.7071]], dtype=np.float32)
     idx = VectorIndex(ids, mat)
-    res = idx.search(np.array([1, 0], dtype=np.float32), k=2)
+    res = idx.search_unique(np.array([1, 0], dtype=np.float32), k=2)
     assert res[0][0] == "a" and res[1][0] == "c"
 
 
@@ -89,7 +91,7 @@ async def test_funnel_pipeline_runs_experts_and_aggregates(monkeypatch):
                         np.array([[1, 0], [0.9, 0.1], [0.8, 0.2]], dtype=np.float32))
     settings = make_settings()
     events = [e async for e in swarm.search_stream(
-        None, settings, NaiveRetriever(), POEMS, "哭了之后喝酒", vector_index=index)]
+        None, settings, NaiveRetriever(), POEMS, "哭了之后喝酒", doc_index=index)]
     types = [e["type"] for e in events]
 
     assert "criteria" in types and "retrieved" in types
@@ -118,7 +120,7 @@ async def test_fragment_channel_forces_into_shortlist(monkeypatch):
     settings = make_settings()
     events = [e async for e in swarm.search_stream(
         None, settings, NaiveRetriever(), POEMS, "我记得一句酒入愁肠",
-        fragment_index=FragmentIndex(POEMS), vector_index=index)]
+        fragment_index=FragmentIndex(POEMS), doc_index=index)]
 
     assert any(e["type"] == "fragment_hits" and e["count"] == 1 for e in events)
     verdicts = [e for e in events if e["type"] == "verdict"]
