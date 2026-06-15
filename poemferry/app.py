@@ -11,6 +11,7 @@ from .fragments import FragmentIndex
 from .llm import make_client
 from .retriever import NaiveRetriever
 from .swarm import search_stream
+from .vectors import VectorIndex
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     app.state.poems = load_poems(settings.poems_path)
     app.state.retriever = NaiveRetriever()
     app.state.fragment_index = FragmentIndex(app.state.poems)
+    app.state.vector_index = VectorIndex.load() if settings.retrieval_mode == "vector" else None
     yield
 
 
@@ -42,6 +44,8 @@ async def info() -> dict:
         "model": s.deepseek_model,
         "has_key": bool(s.deepseek_api_key),
         "languages": sorted({p.language for p in app.state.poems}),
+        "retrieval": s.retrieval_mode if app.state.vector_index else "scout",
+        "indexed": len(app.state.vector_index.ids) if app.state.vector_index else 0,
     }
 
 
@@ -81,6 +85,7 @@ async def search(q: str = Query(..., min_length=1)) -> StreamingResponse:
             app.state.poems,
             q,
             fragment_index=app.state.fragment_index,
+            vector_index=app.state.vector_index,
         )
         async for event in stream:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

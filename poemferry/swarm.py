@@ -10,53 +10,50 @@ from .retriever import Retriever
 
 UNDERSTAND_SYS = """You are the query-understanding module of a multilingual poetry \
 search engine. The user describes, in any language, a poem they are trying to find \
-— an image, a mood, a scene, or a half-remembered line. Extract a structured search \
-intent.
+— an image, a mood, a scene, a sequence of events, or a half-remembered line. \
+Decompose the request into independently checkable criteria.
 
 Respond ONLY with a JSON object with exactly these keys:
-- intent_summary: a concise normalized semantic summary, in English, of what they seek
+- intent_summary: a concise normalized English summary of what they seek (used for retrieval)
 - query_lang: ISO code of the language the user wrote in (e.g. "zh", "en", "ja", "fr")
-- imagery: array of short strings (key images)
-- emotion: array of short strings (emotions/mood)
-- setting: array of short strings (time, place, situation)
-- has_fragment: boolean — true if they quoted or remembered an actual line
-- fragments: array of the verbatim lines/phrases the user quoted or half-remembers
-  from the poem itself (copy them exactly as written; empty array if none)
-- lang_hint: array of language codes to restrict the search to, or null for any language
+- criteria: array of 1-5 objects, each an independently verifiable condition:
+    {"aspect": "<short English description>",
+     "kind": "imagery|emotion|action|sequence|setting",
+     "weight": 0.0-1.0}
+  Decompose compound requests: give EACH distinct emotion, action, image, or scene
+  its own criterion. If the order of events matters, ADD a separate "sequence"
+  criterion on top of the component ones. Example: "crying then drinking" →
+  [weeping(emotion), drinking wine(action), crying precedes drinking(sequence)].
+- fragments: array of verbatim lines/phrases the user quoted from the poem (empty if none)
+- lang_hint: array of language codes — ONLY when the user EXPLICITLY asks for a
+  language (e.g. "a French poem"). Otherwise null. Never infer it from the language
+  the user happens to be writing in; matching is cross-lingual by design.
 
-Do not add extra keys. Do not translate the user's words into the poem; just analyze."""
+Do not add extra keys. Do not translate; just analyze."""
 
-SCOUT_SYS = """You are a scout agent in a poetry search swarm. You receive compact \
-digests of poems (id | language | author | title | opening lines) followed by a \
-user's description. Pick the poems that plausibly match the description by meaning, \
-imagery, or mood — across languages. Be inclusive: a later stage reads the full \
-texts and judges strictly; your job is recall, not precision.
-
-Respond ONLY with JSON: {"candidates": [{"poem_id": "...", "score": 0.0}]}
-score is 0.0–1.0 plausibility. Include only plausible poems (empty array if none)."""
-
-MATCH_SYS = """You are one agent in a swarm that judges whether candidate poems match \
-a user's description.
+EXPERT_SYS = """You are a specialist agent in a poetry-judging swarm. You verify ONE \
+criterion against candidate poems.
 
 Hard rules:
-1. NEVER translate any poem. Poems stay in their original language, untouched.
-2. Judge by meaning, imagery, and emotion — across languages. A description in one \
-language can match a poem in another.
-3. For each candidate poem, decide:
-   - match (boolean): true only when there is a genuine semantic correspondence
-   - confidence (0.0–1.0)
-   - matched_description_aspects: which parts of the user's description it matches
-   - evidence_lines: lines copied VERBATIM from the poem's original text (never translated)
-   - explanation: HOW it matches
-4. The explanation MUST be written in the user's query language (given as query_lang).
-5. Be strict. Most candidates will not match; say so.
+1. NEVER translate any poem; poems stay in their original language.
+2. Judge across languages — the criterion is in English, poems may be any language.
+3. A poem satisfies the criterion only on genuine evidence in its text.
+4. For "sequence" criteria, judge whether the events occur in the stated order; be \
+lenient if the poem strongly implies it.
+5. evidence_lines must be copied VERBATIM from the poem (never translated). The note \
+explaining the match must be written in the given query_lang.
 
-Respond ONLY with JSON of this shape:
-{"verdicts": [{"poem_id": "...", "match": true, "confidence": 0.0,
-  "matched_description_aspects": ["..."], "evidence_lines": ["..."],
-  "explanation": "...", "explanation_lang": "<query_lang>"}]}
-Include ONLY the poems that match (an empty array when none do); never list
-non-matching poems."""
+Respond ONLY with JSON: {"hits": [{"poem_id": "...", "evidence_lines": ["..."], \
+"note": "..."}]}
+Include ONLY poems that satisfy THIS criterion (empty array if none)."""
+
+SCOUT_SYS = """You are a scout agent in a poetry search swarm. You receive compact \
+digests of poems (id | language | author | title | gist) followed by a user's \
+description. Pick the poems that plausibly match by meaning, imagery, or mood — \
+across languages. Be inclusive; a later stage judges strictly.
+
+Respond ONLY with JSON: {"candidates": [{"poem_id": "...", "score": 0.0}]}
+score is 0.0-1.0 plausibility. Include only plausible poems (empty array if none)."""
 
 
 def _format_poem(p: Poem) -> str:
@@ -65,15 +62,10 @@ def _format_poem(p: Poem) -> str:
 
 
 def _digest(p: Poem) -> str:
-    # With a whole-poem gist available, one opening line suffices; the gist
-    # is what lets scouts see content from a long poem's later sections.
-    gist = (p.enrichment or {}).get("gist")
+    enr = p.enrichment or {}
+    gist = enr.get("gist")
     if gist:
-        opening = (p.full_text.splitlines() or [""])[0][:40]
-        return (
-            f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | "
-            f"{opening} | gist: {gist}"
-        )
+        return f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | gist: {gist}"
     opening = " / ".join(p.full_text.splitlines()[:2])[:80]
     return f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | {opening}"
 
@@ -83,7 +75,7 @@ async def understand_query(
 ) -> dict:
     user = f"User description:\n{description}"
     return await chat_json(
-        client, settings.deepseek_model, UNDERSTAND_SYS, user, max_tokens=600, usage=usage
+        client, settings.deepseek_model, UNDERSTAND_SYS, user, max_tokens=900, usage=usage
     )
 
 
@@ -94,12 +86,6 @@ async def scout_batch(
     batch: list[Poem],
     usage: dict | None = None,
 ) -> list[tuple[str, float]]:
-    """Stage-1 scan over compact digests; returns (poem_id, score) candidates.
-
-    The static digest block comes FIRST and the query LAST: chunks are stable
-    across queries, so DeepSeek's automatic prefix caching makes repeat scans
-    of the same chunk ~10x cheaper on input tokens.
-    """
     digests = "\n".join(_digest(p) for p in batch)
     user = f"Poem digests:\n{digests}\n\nUser description:\n{description}"
     data = await chat_json(
@@ -108,39 +94,87 @@ async def scout_batch(
     ids = {p.id for p in batch}
     out: list[tuple[str, float]] = []
     for c in data.get("candidates", []):
-        pid = c.get("poem_id")
-        if pid in ids:
+        if c.get("poem_id") in ids:
             try:
-                out.append((pid, float(c.get("score", 0.5))))
+                out.append((c["poem_id"], float(c.get("score", 0.5))))
             except (TypeError, ValueError):
-                out.append((pid, 0.5))
+                out.append((c["poem_id"], 0.5))
     return out
 
 
-async def match_batch(
+async def expert_batch(
     client: AsyncOpenAI,
     settings: Settings,
-    description: str,
+    criterion: dict,
     query_lang: str,
     batch: list[Poem],
     usage: dict | None = None,
-) -> list[Verdict]:
+) -> dict[str, dict]:
+    """Verify one criterion against a batch; returns {poem_id: {evidence_lines, note}}."""
     poems_blob = "\n\n---\n\n".join(_format_poem(p) for p in batch)
     user = (
-        f"Candidate poems (judge each; keep original language):\n\n{poems_blob}\n\n"
-        f"query_lang: {query_lang}\n"
-        f"User description:\n{description}"
+        f"Criterion ({criterion.get('kind', 'imagery')}): {criterion.get('aspect', '')}\n"
+        f"query_lang: {query_lang}\n\n"
+        f"Candidate poems (keep original language):\n\n{poems_blob}"
     )
     data = await chat_json(
-        client, settings.deepseek_model, MATCH_SYS, user, max_tokens=2500, usage=usage
+        client, settings.deepseek_model, EXPERT_SYS, user, max_tokens=2000, usage=usage
     )
+    ids = {p.id for p in batch}
+    hits: dict[str, dict] = {}
+    for h in data.get("hits", []):
+        pid = h.get("poem_id")
+        if pid in ids:
+            hits[pid] = {
+                "evidence_lines": [str(x) for x in h.get("evidence_lines", [])][:4],
+                "note": str(h.get("note", "")),
+            }
+    return hits
+
+
+def aggregate(
+    shortlist: list[Poem],
+    criteria: list[dict],
+    hits_by_criterion: list[dict[str, dict]],
+    query_lang: str,
+    limit: int = 8,
+) -> list[Verdict]:
+    """Weighted vote across criteria. Sequence criteria contribute when satisfied
+    but never hard-reject (missing one only lowers the score)."""
+    total_weight = sum(c.get("weight", 1.0) for c in criteria) or 1.0
+    by_id = {p.id: p for p in shortlist}
     verdicts: list[Verdict] = []
-    for raw in data.get("verdicts", []):
-        try:
-            verdicts.append(Verdict(**raw))
-        except Exception:
+    for pid, poem in by_id.items():
+        score = 0.0
+        aspects: list[str] = []
+        evidence: list[str] = []
+        notes: list[str] = []
+        for crit, hits in zip(criteria, hits_by_criterion):
+            hit = hits.get(pid)
+            if hit:
+                score += crit.get("weight", 1.0)
+                aspects.append(crit.get("aspect", ""))
+                evidence.extend(hit["evidence_lines"])
+                if hit["note"]:
+                    notes.append(hit["note"])
+        if not aspects:
             continue
-    return verdicts
+        confidence = round(score / total_weight, 3)
+        verdicts.append(
+            Verdict(
+                poem_id=pid,
+                match=True,
+                confidence=confidence,
+                matched_description_aspects=aspects,
+                evidence_lines=list(dict.fromkeys(evidence))[:6],
+                explanation=" ".join(notes),
+                explanation_lang=query_lang,
+            )
+        )
+    verdicts.sort(key=lambda v: -v.confidence)
+    # Keep clear matches; if everything is weak, still return the best few.
+    strong = [v for v in verdicts if v.confidence >= 0.5]
+    return (strong or verdicts)[:limit]
 
 
 def _chunk(items: list, size: int, max_chunks: int) -> list[list]:
@@ -148,32 +182,42 @@ def _chunk(items: list, size: int, max_chunks: int) -> list[list]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
-async def _run_stage(
-    stage: int,
-    batches: list[list[Poem]],
-    worker,
-    concurrency: int,
-) -> AsyncIterator[dict]:
-    """Run one swarm wave; yields agent_start/agent_done (+ worker events)."""
-    sem = asyncio.Semaphore(concurrency)
-    queue: asyncio.Queue[dict] = asyncio.Queue()
+async def _retrieve(
+    client, settings, intent, candidates, by_id, vector_index, usage, emit
+) -> list[Poem]:
+    """Layer 1: narrow candidates to ~vec_topk. Vector mode embeds the English
+    intent and ranks by cosine; scout mode falls back to a digest-reading swarm."""
+    query_text = intent.get("intent_summary") or ""
+    use_vector = settings.retrieval_mode == "vector" and vector_index is not None and query_text
+    if use_vector:
+        from .vectors import embed_query
 
-    async def run_agent(idx: int, batch: list[Poem]) -> None:
+        try:
+            qvec = await asyncio.to_thread(embed_query, settings, query_text)
+            ranked = vector_index.search(qvec, settings.vec_topk)
+            return [by_id[pid] for pid, _ in ranked if pid in by_id]
+        except Exception as e:
+            await emit({"type": "error", "stage": "retrieve", "message": str(e)})
+    # scout fallback
+    scout_batches = _chunk(candidates, settings.scout_batch_size, settings.swarm_max_agents)
+    await emit({"type": "swarm_dispatched", "stage": 1, "agents": len(scout_batches),
+                "batch_size": len(scout_batches[0])})
+    scored: list[tuple[str, float]] = []
+    sem = asyncio.Semaphore(settings.swarm_concurrency)
+
+    async def run(idx, batch):
         async with sem:
-            await queue.put(
-                {"type": "agent_start", "stage": stage, "agent": idx, "size": len(batch)}
-            )
-            hits = await worker(idx, batch, queue)
-            await queue.put({"type": "agent_done", "stage": stage, "agent": idx, "hits": hits})
+            await emit({"type": "agent_start", "stage": 1, "agent": idx, "size": len(batch)})
+            try:
+                found = await scout_batch(client, settings, query_text, batch, usage)
+            except Exception:
+                found = []
+            scored.extend(found)
+            await emit({"type": "agent_done", "stage": 1, "agent": idx, "hits": len(found)})
 
-    tasks = [asyncio.create_task(run_agent(i, b)) for i, b in enumerate(batches)]
-    finished = 0
-    while finished < len(batches):
-        event = await queue.get()
-        if event["type"] == "agent_done":
-            finished += 1
-        yield event
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*(run(i, b) for i, b in enumerate(scout_batches)))
+    scored.sort(key=lambda t: -t[1])
+    return [by_id[pid] for pid, _ in scored[: settings.vec_topk] if pid in by_id]
 
 
 async def search_stream(
@@ -183,116 +227,96 @@ async def search_stream(
     poems: list[Poem],
     description: str,
     fragment_index=None,
+    vector_index=None,
 ) -> AsyncIterator[dict]:
-    """Run the two-stage query pipeline, yielding progress events for SSE.
+    """Funnel pipeline: retrieve (vector/scout) → trim → dynamic expert swarm →
+    aggregate. Streams events for the live UI.
 
-    Stage 1 (scouts): bounded swarm scans compact digests of every candidate
-    and shortlists plausible poems — cheap tokens, prefix-cache friendly.
-    Stage 2 (judges): swarm reads the full text of the shortlist and produces
-    verdicts with verbatim evidence. Small corpora skip straight to stage 2.
-
-    Event types: start, understanding, candidates, swarm_dispatched(stage),
-    agent_start(stage), agent_done(stage), shortlist, verdict, done, error.
+    Events: start, understanding, criteria, candidates, retrieved, fragment_hits,
+    shortlist, swarm_dispatched(stage=2), agent_start, agent_done, verdict, done, error.
     """
-    yield {"type": "start", "description": description}
-    usage: dict = {}
+    queue: asyncio.Queue[dict] = asyncio.Queue()
 
-    try:
-        intent = await understand_query(client, settings, description, usage)
-    except Exception as e:
-        yield {"type": "error", "stage": "understanding", "message": str(e)}
-        intent = {"intent_summary": description, "query_lang": "", "lang_hint": None}
-    query_lang = intent.get("query_lang") or ""
-    yield {"type": "understanding", "intent": intent}
+    async def emit(ev: dict) -> None:
+        await queue.put(ev)
 
-    candidates = retriever.retrieve(intent, poems)
-    yield {"type": "candidates", "count": len(candidates)}
-    if not candidates:
-        yield {"type": "done", "matched": 0}
-        return
-
-    by_id = {p.id: p for p in candidates}
-
-    # Exact-fragment channel: user-quoted lines are matched verbatim against
-    # the whole corpus (normalized, trad→simp folded) and go straight to the
-    # judges — immune to scout misses on long poems' later sections.
-    forced: list[Poem] = []
-    fragments = intent.get("fragments") or []
-    if fragment_index is not None and fragments:
-        hit_ids = set(fragment_index.find(fragments))
-        forced = [p for p in candidates if p.id in hit_ids]
-        if forced:
-            yield {"type": "fragment_hits", "count": len(forced)}
-    forced_ids = {p.id for p in forced}
-
-    if len(candidates) > settings.shortlist_size:
-        scout_batches = _chunk(candidates, settings.scout_batch_size, settings.swarm_max_agents)
-        yield {
-            "type": "swarm_dispatched",
-            "stage": 1,
-            "agents": len(scout_batches),
-            "batch_size": len(scout_batches[0]),
-        }
-
-        scored: list[tuple[str, float]] = []
-
-        async def scout_worker(idx: int, batch: list[Poem], queue: asyncio.Queue) -> int:
-            try:
-                found = await scout_batch(client, settings, description, batch, usage)
-            except Exception:
-                found = []
-            scored.extend(found)
-            return len(found)
-
-        async for event in _run_stage(1, scout_batches, scout_worker, settings.swarm_concurrency):
-            yield event
-
-        scored.sort(key=lambda t: -t[1])
-        scouted = [
-            by_id[pid]
-            for pid, _ in scored[: settings.shortlist_size]
-            if pid not in forced_ids
-        ]
-        shortlist = forced + scouted
-        yield {"type": "shortlist", "count": len(shortlist)}
-        if not shortlist:
-            yield {"type": "done", "matched": 0}
-            return
-    else:
-        shortlist = candidates
-
-    judge_batches = _chunk(shortlist, settings.swarm_batch_size, settings.swarm_max_agents)
-    yield {
-        "type": "swarm_dispatched",
-        "stage": 2,
-        "agents": len(judge_batches),
-        "batch_size": len(judge_batches[0]),
-    }
-
-    matched = 0
-
-    async def judge_worker(idx: int, batch: list[Poem], queue: asyncio.Queue) -> int:
-        nonlocal matched
+    async def pipeline() -> None:
+        await emit({"type": "start", "description": description})
+        usage: dict = {}
         try:
-            verdicts = await match_batch(client, settings, description, query_lang, batch, usage)
-        except Exception:
-            verdicts = []
-        hits = 0
+            intent = await understand_query(client, settings, description, usage)
+        except Exception as e:
+            await emit({"type": "error", "stage": "understanding", "message": str(e)})
+            intent = {"intent_summary": description, "query_lang": "", "criteria": [],
+                      "fragments": [], "lang_hint": None}
+        query_lang = intent.get("query_lang") or ""
+        criteria = intent.get("criteria") or [
+            {"aspect": intent.get("intent_summary", description), "kind": "imagery", "weight": 1.0}
+        ]
+        await emit({"type": "understanding", "intent": intent})
+        await emit({"type": "criteria", "criteria": criteria})
+
+        candidates = retriever.retrieve(intent, poems)
+        by_id = {p.id: p for p in candidates}
+        await emit({"type": "candidates", "count": len(candidates)})
+        if not candidates:
+            await emit({"type": "done", "matched": 0, "usage": usage})
+            return
+
+        retrieved = await _retrieve(
+            client, settings, intent, candidates, by_id, vector_index, usage, emit
+        )
+        await emit({"type": "retrieved", "count": len(retrieved)})
+
+        # Exact-fragment channel: quoted lines go straight in, ahead of vector hits.
+        forced: list[Poem] = []
+        if fragment_index is not None and intent.get("fragments"):
+            hit_ids = set(fragment_index.find(intent["fragments"]))
+            forced = [by_id[i] for i in hit_ids if i in by_id]
+            if forced:
+                await emit({"type": "fragment_hits", "count": len(forced)})
+        forced_ids = {p.id for p in forced}
+
+        shortlist = forced + [p for p in retrieved if p.id not in forced_ids]
+        shortlist = shortlist[: settings.trim_topn]
+        await emit({"type": "shortlist", "count": len(shortlist)})
+        if not shortlist:
+            await emit({"type": "done", "matched": 0, "usage": usage})
+            return
+
+        # Layer 3: one expert per (criterion × poem-batch), all concurrent.
+        batches = _chunk(shortlist, settings.expert_batch, settings.swarm_max_agents)
+        jobs = [(c, b) for c in criteria for b in batches]
+        await emit({"type": "swarm_dispatched", "stage": 2, "agents": len(jobs),
+                    "batch_size": settings.expert_batch})
+        sem = asyncio.Semaphore(settings.swarm_concurrency)
+        per_criterion: list[dict[str, dict]] = [{} for _ in criteria]
+        crit_index = {id(c): i for i, c in enumerate(criteria)}
+
+        async def run_expert(idx, criterion, batch):
+            async with sem:
+                await emit({"type": "agent_start", "stage": 2, "agent": idx,
+                            "criterion": criterion.get("aspect", ""),
+                            "kind": criterion.get("kind", ""), "size": len(batch)})
+                try:
+                    hits = await expert_batch(client, settings, criterion, query_lang, batch, usage)
+                except Exception:
+                    hits = {}
+                per_criterion[crit_index[id(criterion)]].update(hits)
+                await emit({"type": "agent_done", "stage": 2, "agent": idx, "hits": len(hits)})
+
+        await asyncio.gather(*(run_expert(i, c, b) for i, (c, b) in enumerate(jobs)))
+
+        verdicts = aggregate(shortlist, criteria, per_criterion, query_lang)
         for v in verdicts:
-            if v.match and v.poem_id in by_id:
-                hits += 1
-                matched += 1
-                await queue.put(
-                    {
-                        "type": "verdict",
-                        "agent": idx,
-                        "verdict": v.model_dump(),
-                        "poem": by_id[v.poem_id].model_dump(),
-                    }
-                )
-        return hits
+            await emit({"type": "verdict", "verdict": v.model_dump(),
+                        "poem": by_id[v.poem_id].model_dump()})
+        await emit({"type": "done", "matched": len(verdicts), "usage": usage})
 
-    async for event in _run_stage(2, judge_batches, judge_worker, settings.swarm_concurrency):
+    task = asyncio.create_task(pipeline())
+    while True:
+        event = await queue.get()
         yield event
-
-    yield {"type": "done", "matched": matched, "usage": usage}
+        if event["type"] == "done":
+            break
+    await task

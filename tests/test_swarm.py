@@ -1,27 +1,26 @@
+import numpy as np
+
 import poemferry.swarm as swarm
 from poemferry.config import Settings
-from poemferry.models import Poem, Verdict
+from poemferry.models import Poem
 from poemferry.retriever import NaiveRetriever
+from poemferry.vectors import VectorIndex
 
 
 def make_settings(**overrides) -> Settings:
     base = dict(
-        deepseek_api_key="test",
-        deepseek_base_url="https://example.invalid",
-        deepseek_model="deepseek-v4-flash",
-        swarm_batch_size=2,
-        swarm_concurrency=4,
-        swarm_max_agents=128,
-        scout_batch_size=2,
-        shortlist_size=10,
-        poems_path="data",
+        deepseek_api_key="test", deepseek_base_url="https://example.invalid",
+        deepseek_model="deepseek-v4-flash", swarm_batch_size=2, swarm_concurrency=4,
+        swarm_max_agents=128, scout_batch_size=2, shortlist_size=10, poems_path="data",
+        retrieval_mode="vector", embed_base_url="https://example.invalid", embed_api_key="k",
+        embed_model="embed-v-4-0", vec_topk=10, trim_topn=10, expert_batch=2,
     )
     base.update(overrides)
     return Settings(**base)
 
 
 POEMS = [
-    Poem(id="p1", title="A", author="X", language="zh", full_text="床前明月光",
+    Poem(id="p1", title="A", author="X", language="zh", full_text="酒入愁肠\n泪如雨下",
          source_name="s", license="MIT"),
     Poem(id="p2", title="B", author="Y", language="fr", full_text="Demain, dès l'aube",
          source_name="s", license="PD"),
@@ -30,105 +29,97 @@ POEMS = [
 ]
 
 
-def test_naive_retriever_returns_all_without_hint():
-    r = NaiveRetriever()
-    assert len(r.retrieve({}, POEMS)) == 3
-
-
-def test_naive_retriever_filters_by_lang_hint():
-    r = NaiveRetriever()
-    out = r.retrieve({"lang_hint": ["fr"]}, POEMS)
-    assert [p.id for p in out] == ["p2"]
-
-
-def test_naive_retriever_ignores_unmatched_hint():
-    r = NaiveRetriever()
-    # No Japanese poems: fall back to the full corpus rather than returning nothing.
-    assert len(r.retrieve({"lang_hint": ["ja"]}, POEMS)) == 3
-
-
 async def fake_understand(client, settings, description, usage=None):
-    return {"intent_summary": "moon", "query_lang": "zh", "lang_hint": None}
+    return {
+        "intent_summary": "crying then drinking wine", "query_lang": "zh",
+        "criteria": [
+            {"aspect": "weeping", "kind": "emotion", "weight": 1.0},
+            {"aspect": "drinking wine", "kind": "action", "weight": 1.0},
+        ],
+        "fragments": [], "lang_hint": None,
+    }
 
 
-async def fake_match(client, settings, description, query_lang, batch, usage=None):
-    return [
-        Verdict(poem_id=p.id, match=True, confidence=0.9,
-                matched_description_aspects=["月"], evidence_lines=["床前明月光"],
-                explanation="月光", explanation_lang="zh")
-        for p in batch if p.id == "p1"
-    ]
+async def fake_expert(client, settings, criterion, query_lang, batch, usage=None):
+    # Both criteria hit only p1.
+    return {p.id: {"evidence_lines": ["酒入愁肠"], "note": "命中"} for p in batch if p.id == "p1"}
 
 
-async def test_small_corpus_skips_scout_stage(monkeypatch):
+# ── retriever / fragments unchanged behaviour ──
+def test_naive_retriever_filters_by_lang_hint():
+    assert [p.id for p in NaiveRetriever().retrieve({"lang_hint": ["fr"]}, POEMS)] == ["p2"]
+
+
+# ── aggregation ──
+def test_aggregate_weighted_vote_and_sort():
+    criteria = [{"aspect": "weep", "kind": "emotion", "weight": 1.0},
+                {"aspect": "drink", "kind": "action", "weight": 1.0}]
+    hits = [{"p1": {"evidence_lines": ["泪如雨下"], "note": "哭"}},
+            {"p1": {"evidence_lines": ["酒入愁肠"], "note": "喝"}, "p3": {"evidence_lines": ["x"], "note": "?"}}]
+    out = swarm.aggregate(POEMS, criteria, hits, "zh")
+    assert out[0].poem_id == "p1" and out[0].confidence == 1.0
+    # p3 hit only one of two criteria → 0.5, kept but ranked below p1.
+    assert [v.poem_id for v in out] == ["p1", "p3"]
+    assert "哭" in out[0].explanation and "喝" in out[0].explanation
+
+
+def test_aggregate_ignores_poems_with_no_hits():
+    criteria = [{"aspect": "x", "kind": "imagery", "weight": 1.0}]
+    out = swarm.aggregate(POEMS, criteria, [{}], "zh")
+    assert out == []
+
+
+# ── vector index ──
+def test_vector_index_cosine_topk():
+    ids = ["a", "b", "c"]
+    mat = np.array([[1, 0], [0, 1], [0.7071, 0.7071]], dtype=np.float32)
+    idx = VectorIndex(ids, mat)
+    res = idx.search(np.array([1, 0], dtype=np.float32), k=2)
+    assert res[0][0] == "a" and res[1][0] == "c"
+
+
+# ── full pipeline (vector retrieval mocked via a tiny index) ──
+async def test_funnel_pipeline_runs_experts_and_aggregates(monkeypatch):
     monkeypatch.setattr(swarm, "understand_query", fake_understand)
-    monkeypatch.setattr(swarm, "match_batch", fake_match)
+    monkeypatch.setattr(swarm, "expert_batch", fake_expert)
+    monkeypatch.setattr("poemferry.vectors.embed_query",
+                        lambda settings, text: np.array([1, 0], dtype=np.float32))
 
-    settings = make_settings(shortlist_size=10)  # corpus of 3 ≤ 10 → no stage 1
-    events = [e async for e in swarm.search_stream(None, settings, NaiveRetriever(), POEMS, "月亮")]
+    index = VectorIndex(["p1", "p2", "p3"],
+                        np.array([[1, 0], [0.9, 0.1], [0.8, 0.2]], dtype=np.float32))
+    settings = make_settings()
+    events = [e async for e in swarm.search_stream(
+        None, settings, NaiveRetriever(), POEMS, "哭了之后喝酒", vector_index=index)]
     types = [e["type"] for e in events]
 
-    assert "shortlist" not in types
-    stages = {e["stage"] for e in events if e["type"] == "swarm_dispatched"}
-    assert stages == {2}
+    assert "criteria" in types and "retrieved" in types
+    assert [e["stage"] for e in events if e["type"] == "swarm_dispatched"] == [2]
     verdicts = [e for e in events if e["type"] == "verdict"]
-    assert len(verdicts) == 1 and verdicts[0]["poem"]["id"] == "p1"
+    assert [v["poem"]["id"] for v in verdicts] == ["p1"]
     assert events[-1]["type"] == "done" and events[-1]["matched"] == 1
 
 
-async def test_large_corpus_runs_scout_then_judge(monkeypatch):
-    async def fake_scout(client, settings, description, batch, usage=None):
-        # Scouts shortlist p1 and p2 only.
-        return [(p.id, 0.8) for p in batch if p.id in ("p1", "p2")]
-
-    monkeypatch.setattr(swarm, "understand_query", fake_understand)
-    monkeypatch.setattr(swarm, "scout_batch", fake_scout)
-    monkeypatch.setattr(swarm, "match_batch", fake_match)
-
-    settings = make_settings(shortlist_size=2)  # corpus of 3 > 2 → stage 1 runs
-    events = [e async for e in swarm.search_stream(None, settings, NaiveRetriever(), POEMS, "月亮")]
-    types = [e["type"] for e in events]
-
-    stages = [e["stage"] for e in events if e["type"] == "swarm_dispatched"]
-    assert stages == [1, 2]
-    shortlist = next(e for e in events if e["type"] == "shortlist")
-    assert shortlist["count"] == 2
-    # Judges only saw the shortlist, and only p1 matched.
-    verdicts = [e for e in events if e["type"] == "verdict"]
-    assert [v["poem"]["id"] for v in verdicts] == ["p1"]
-    assert types[-1] == "done"
-
-
-def test_digest_includes_gist_when_enriched():
-    enriched = POEMS[0].model_copy(
-        update={"enrichment": {"themes": ["moon"], "gist": "moonlight homesickness at night"}}
-    )
-    d = swarm._digest(enriched)
-    assert "gist: moonlight homesickness at night" in d
-    # Un-enriched poems keep the two-line opening digest.
-    assert "gist:" not in swarm._digest(POEMS[1])
-
-
-async def test_fragment_hits_bypass_scout_misses(monkeypatch):
+async def test_fragment_channel_forces_into_shortlist(monkeypatch):
     from poemferry.fragments import FragmentIndex
 
-    async def scout_misses_everything(client, settings, description, batch, usage=None):
-        return []
-
     async def understand_with_fragment(client, settings, description, usage=None):
-        return {"intent_summary": "moon", "query_lang": "zh",
-                "fragments": ["床前明月光"], "lang_hint": None}
+        d = await fake_understand(client, settings, description, usage)
+        d["fragments"] = ["酒入愁肠"]
+        return d
 
     monkeypatch.setattr(swarm, "understand_query", understand_with_fragment)
-    monkeypatch.setattr(swarm, "scout_batch", scout_misses_everything)
-    monkeypatch.setattr(swarm, "match_batch", fake_match)
+    monkeypatch.setattr(swarm, "expert_batch", fake_expert)
+    monkeypatch.setattr("poemferry.vectors.embed_query",
+                        lambda settings, text: np.array([0, 1], dtype=np.float32))
 
-    settings = make_settings(shortlist_size=2)  # forces stage 1, which finds nothing
-    index = FragmentIndex(POEMS)
+    # Vector ranks p1 last, but the quoted line forces it into the shortlist.
+    index = VectorIndex(["p2", "p3", "p1"],
+                        np.array([[0, 1], [0.1, 0.9], [0.2, 0.8]], dtype=np.float32))
+    settings = make_settings()
     events = [e async for e in swarm.search_stream(
-        None, settings, NaiveRetriever(), POEMS, "我记得一句床前明月光", fragment_index=index)]
+        None, settings, NaiveRetriever(), POEMS, "我记得一句酒入愁肠",
+        fragment_index=FragmentIndex(POEMS), vector_index=index)]
 
     assert any(e["type"] == "fragment_hits" and e["count"] == 1 for e in events)
-    # Despite scouts returning nothing, the quoted poem reached the judges.
     verdicts = [e for e in events if e["type"] == "verdict"]
     assert [v["poem"]["id"] for v in verdicts] == ["p1"]

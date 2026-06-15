@@ -16,6 +16,13 @@ class Settings:
     scout_batch_size: int
     shortlist_size: int
     poems_path: str
+    retrieval_mode: str
+    embed_base_url: str
+    embed_api_key: str
+    embed_model: str
+    vec_topk: int
+    trim_topn: int
+    expert_batch: int
 
 
 def load_settings() -> Settings:
@@ -29,4 +36,11 @@ def load_settings() -> Settings:
         scout_batch_size=int(os.environ.get("SWARM_SCOUT_BATCH", "80")),
         shortlist_size=int(os.environ.get("SWARM_SHORTLIST", "240")),
         poems_path=os.environ.get("POEMS_PATH", "data"),
+        retrieval_mode=os.environ.get("RETRIEVAL_MODE", "vector"),
+        embed_base_url=os.environ.get("EMBED_BASE_URL", "https://aihubmix.com/v1"),
+        embed_api_key=os.environ.get("EMBED_API_KEY", ""),
+        embed_model=os.environ.get("EMBED_MODEL", "embed-v-4-0"),
+        vec_topk=int(os.environ.get("VEC_TOPK", "80")),
+        trim_topn=int(os.environ.get("TRIM_TOPN", "30")),
+        expert_batch=int(os.environ.get("EXPERT_BATCH", "8")),
     )
