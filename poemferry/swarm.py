@@ -279,7 +279,12 @@ async def search_stream(
 
         shortlist = forced + [p for p in retrieved if p.id not in forced_ids]
         shortlist = shortlist[: settings.trim_topn]
-        await emit({"type": "shortlist", "count": len(shortlist)})
+        cards = [
+            {"id": p.id, "title": p.title, "author": p.author, "language": p.language,
+             "preview": "\n".join(p.full_text.splitlines()[:6])}
+            for p in shortlist
+        ]
+        await emit({"type": "shortlist", "count": len(shortlist), "cards": cards})
         if not shortlist:
             await emit({"type": "done", "matched": 0, "usage": usage})
             return
@@ -303,6 +308,11 @@ async def search_stream(
                 except Exception:
                     hits = {}
                 per_criterion[crit_index[id(criterion)]].update(hits)
+                for pid, h in hits.items():
+                    await emit({"type": "expert_hit", "agent": idx, "poem_id": pid,
+                                "kind": criterion.get("kind", ""),
+                                "aspect": criterion.get("aspect", ""),
+                                "evidence": h["evidence_lines"]})
                 await emit({"type": "agent_done", "stage": 2, "agent": idx, "hits": len(hits)})
 
         await asyncio.gather(*(run_expert(i, c, b) for i, (c, b) in enumerate(jobs)))

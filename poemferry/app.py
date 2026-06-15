@@ -75,6 +75,22 @@ async def browse(
     }
 
 
+@app.get("/api/sample")
+async def sample(n: int = Query(240, ge=1, le=800)) -> dict:
+    """Poem lines for the digital-rain animation. Deterministic stride sample
+    across the corpus (no RNG needed) for language variety."""
+    poems = app.state.poems
+    step = max(1, len(poems) // n)
+    lines: list[str] = []
+    for p in poems[::step]:
+        for ln in p.full_text.splitlines():
+            ln = ln.strip()
+            if 2 <= len(ln) <= 32:
+                lines.append(ln)
+                break
+    return {"lines": lines[:n]}
+
+
 @app.get("/api/search")
 async def search(q: str = Query(..., min_length=1)) -> StreamingResponse:
     async def event_gen():
