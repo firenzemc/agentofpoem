@@ -25,3 +25,6 @@ __pycache__/
 
 # built embedding indices (rebuild via scripts/build_embeddings.py)
 data/*.npz
+
+# ColBERT spike cache (1.3GB, rebuild via scripts/spike_colbert.py)
+*.pkl

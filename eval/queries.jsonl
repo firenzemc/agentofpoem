@@ -1,0 +1,10 @@
+{"id": "q1-yellowriver", "q": "一首写黄河奔流、一去不回的诗", "lang": "zh", "type": "incidental-detail", "expect": ["zh-tang300-0004", "zh-tang300-0124"], "note": "将进酒开篇黄河之水天上来——意象局部高光，非全诗主题"}
+{"id": "q2-river-landscape", "q": "有关河流与天地广阔的描写", "lang": "zh", "type": "thematic", "expect": ["zh-tang300-0138", "zh-tang300-0322", "zh-shijing-0061", "zh-shijing-0009"], "bonus": ["zh-tang300-0004", "zh-tang300-0124"], "note": "汉江临泛/渡荆门送别/河广/汉广;将进酒为加分(局部)"}
+{"id": "q3-drown-sorrow", "q": "哭过之后借酒消愁", "lang": "zh", "type": "compound", "expect": ["zh-tang300-0324"], "bonus": ["zh-tang300-0004", "zh-tang300-0124"], "note": "宣州谢朓楼饯别 举杯销愁愁更愁;将进酒销万古愁"}
+{"id": "q4-changhenge-desc", "q": "皇帝思念死去的爱妃，派方士寻她魂魄，结尾发愿来世做比翼鸟连理枝", "lang": "zh", "type": "thematic-late-section", "expect": ["zh-tang300-0178"], "note": "长恨歌后段内容"}
+{"id": "q5-biyiniao-fragment", "q": "在天愿作比翼鸟", "lang": "zh", "type": "fragment", "expect": ["zh-tang300-0178"], "note": "简体引句命中繁体原文"}
+{"id": "q6-crosslingual-river-zh", "q": "一条静静流淌的河流", "lang": "zh", "type": "crosslingual", "expect": ["es-disco-2217", "es-disco-0949", "es-disco-2339", "de-tg-m%C3%B6rike-0023"], "note": "中文 query 期望召回西/德语 river 诗(Los ríos/El río/A un río/Mein Fluß)"}
+{"id": "q7-crosslingual-river-en", "q": "a great river rushing to the sea, never to return; the passing of time", "lang": "en", "type": "crosslingual", "expect": ["zh-tang300-0004", "zh-tang300-0124"], "note": "英文 query 期望命中中文将进酒(黄河之水...奔流到海不复回)——ColBERT 跨语言 token 匹配的硬例"}
+{"id": "q8-autumn-homesick", "q": "深秋黄昏，漂泊异乡，满怀乡愁", "lang": "zh", "type": "thematic", "expect": ["zh-tang300-0322"], "note": "乡愁漂泊主题(渡荆门送别 仍怜故乡水);宽松"}
+{"id": "q9-quiet-night-moon", "q": "夜里抬头看月亮，思念故乡", "lang": "zh", "type": "thematic", "expect": ["zh-tang300-0311"], "note": "静夜思"}
+{"id": "q10-cry-then-drink", "q": "先流泪痛哭，然后举杯饮酒", "lang": "zh", "type": "sequence", "expect": ["zh-tang300-0324"], "bonus": ["zh-tang300-0004", "zh-tang300-0124"], "note": "时序:先哭后饮"}
