@@ -51,9 +51,13 @@ Hard rules:
 lenient if the poem strongly implies it.
 5. evidence_lines must be copied VERBATIM from the poem (never translated). The note \
 explaining the match must be written in the given query_lang.
+6. label: a SHORT tag (1-3 words) naming the matched concept, written IN THE POEM'S \
+OWN LANGUAGE — a Spanish poem gets a Spanish label, a French poem a French one, a \
+Chinese poem a Chinese one. This surfaces the match in the poem's native tongue, \
+independent of the query language.
 
-Respond ONLY with JSON: {"hits": [{"poem_id": "...", "evidence_lines": ["..."], \
-"note": "..."}]}
+Respond ONLY with JSON: {"hits": [{"poem_id": "...", "label": "...", \
+"evidence_lines": ["..."], "note": "..."}]}
 Include ONLY poems that satisfy THIS criterion (empty array if none)."""
 
 def _format_poem(p: Poem) -> str:
@@ -94,6 +98,7 @@ async def expert_batch(
         pid = h.get("poem_id")
         if pid in ids:
             hits[pid] = {
+                "label": str(h.get("label", "")),
                 "evidence_lines": [str(x) for x in h.get("evidence_lines", [])][:4],
                 "note": str(h.get("note", "")),
             }
@@ -121,7 +126,9 @@ def aggregate(
             hit = hits.get(pid)
             if hit:
                 score += crit.get("weight", 1.0)
-                aspects.append(crit.get("aspect", ""))
+                # Tag the card in the poem's own language (expert-provided label),
+                # falling back to the query-language criterion aspect.
+                aspects.append(hit.get("label") or crit.get("aspect", ""))
                 evidence.extend(hit["evidence_lines"])
                 if hit["note"]:
                     notes.append(hit["note"])
@@ -133,7 +140,7 @@ def aggregate(
                 poem_id=pid,
                 match=True,
                 confidence=confidence,
-                matched_description_aspects=aspects,
+                matched_description_aspects=list(dict.fromkeys(aspects)),
                 evidence_lines=list(dict.fromkeys(evidence))[:6],
                 explanation=" ".join(notes),
                 explanation_lang=query_lang,
