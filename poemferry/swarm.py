@@ -17,13 +17,15 @@ Respond ONLY with a JSON object with exactly these keys:
 - intent_summary: a concise normalized English summary of what they seek (used for retrieval)
 - query_lang: ISO code of the language the user wrote in (e.g. "zh", "en", "ja", "fr")
 - criteria: array of 1-5 objects, each an independently verifiable condition:
-    {"aspect": "<short English description>",
+    {"aspect": "<short description, IN THE USER'S QUERY LANGUAGE (query_lang)>",
      "kind": "imagery|emotion|action|sequence|setting",
      "weight": 0.0-1.0}
-  Decompose compound requests: give EACH distinct emotion, action, image, or scene
-  its own criterion. If the order of events matters, ADD a separate "sequence"
-  criterion on top of the component ones. Example: "crying then drinking" →
-  [weeping(emotion), drinking wine(action), crying precedes drinking(sequence)].
+  The aspect is shown to the user, so write it in their language (a Chinese query
+  gets Chinese aspects). Decompose compound requests: give EACH distinct emotion,
+  action, image, or scene its own criterion. If the order of events matters, ADD a
+  separate "sequence" criterion. Example (English query "crying then drinking") →
+  [weeping(emotion), drinking wine(action), crying precedes drinking(sequence)];
+  a Chinese query "哭了之后喝酒" → [流泪(emotion), 饮酒(action), 先哭后饮(sequence)].
 - fragments: array of verbatim lines/phrases the user quoted from the poem (empty if none)
 - lang_hint: array of language codes — ONLY when the user EXPLICITLY asks for a
   language (e.g. "a French poem"). Otherwise null. Never infer it from the language
@@ -54,27 +56,9 @@ Respond ONLY with JSON: {"hits": [{"poem_id": "...", "evidence_lines": ["..."], 
 "note": "..."}]}
 Include ONLY poems that satisfy THIS criterion (empty array if none)."""
 
-SCOUT_SYS = """You are a scout agent in a poetry search swarm. You receive compact \
-digests of poems (id | language | author | title | gist) followed by a user's \
-description. Pick the poems that plausibly match by meaning, imagery, or mood — \
-across languages. Be inclusive; a later stage judges strictly.
-
-Respond ONLY with JSON: {"candidates": [{"poem_id": "...", "score": 0.0}]}
-score is 0.0-1.0 plausibility. Include only plausible poems (empty array if none)."""
-
-
 def _format_poem(p: Poem) -> str:
     head = f"[id={p.id}] {p.title or '(untitled)'} — {p.author or '(unknown)'} (lang={p.language})"
     return head + "\n" + p.full_text
-
-
-def _digest(p: Poem) -> str:
-    enr = p.enrichment or {}
-    gist = enr.get("gist")
-    if gist:
-        return f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | gist: {gist}"
-    opening = " / ".join(p.full_text.splitlines()[:2])[:80]
-    return f"{p.id} | {p.language} | {p.author or '?'} | {p.title or '?'} | {opening}"
 
 
 async def understand_query(
@@ -84,29 +68,6 @@ async def understand_query(
     return await chat_json(
         client, swarm_model(settings), UNDERSTAND_SYS, user, max_tokens=900, usage=usage
     )
-
-
-async def scout_batch(
-    client: AsyncOpenAI,
-    settings: Settings,
-    description: str,
-    batch: list[Poem],
-    usage: dict | None = None,
-) -> list[tuple[str, float]]:
-    digests = "\n".join(_digest(p) for p in batch)
-    user = f"Poem digests:\n{digests}\n\nUser description:\n{description}"
-    data = await chat_json(
-        client, swarm_model(settings), SCOUT_SYS, user, max_tokens=1500, usage=usage
-    )
-    ids = {p.id for p in batch}
-    out: list[tuple[str, float]] = []
-    for c in data.get("candidates", []):
-        if c.get("poem_id") in ids:
-            try:
-                out.append((c["poem_id"], float(c.get("score", 0.5))))
-            except (TypeError, ValueError):
-                out.append((c["poem_id"], 0.5))
-    return out
 
 
 async def expert_batch(
@@ -241,26 +202,9 @@ async def _retrieve(
     except Exception as e:
         await emit({"type": "error", "stage": "retrieve", "message": str(e)})
 
-    # scout fallback
-    scout_batches = _chunk(candidates, settings.scout_batch_size, settings.swarm_max_agents)
-    await emit({"type": "swarm_dispatched", "stage": 1, "agents": len(scout_batches),
-                "batch_size": len(scout_batches[0])})
-    scored: list[tuple[str, float]] = []
-    sem = asyncio.Semaphore(settings.swarm_concurrency)
-
-    async def run(idx, batch):
-        async with sem:
-            await emit({"type": "agent_start", "stage": 1, "agent": idx, "size": len(batch)})
-            try:
-                found = await scout_batch(client, settings, intent_text, batch, usage)
-            except Exception:
-                found = []
-            scored.extend(found)
-            await emit({"type": "agent_done", "stage": 1, "agent": idx, "hits": len(found)})
-
-    await asyncio.gather(*(run(i, b) for i, b in enumerate(scout_batches)))
-    scored.sort(key=lambda t: -t[1])
-    return [by_id[pid] for pid, _ in scored[:k] if pid in by_id]
+    # No channel produced candidates → return nothing (never LLM-scan the full
+    # corpus; at hundreds of thousands of poems that would be catastrophic).
+    return []
 
 
 async def search_stream(
