@@ -101,6 +101,35 @@ async def test_funnel_pipeline_runs_experts_and_aggregates(monkeypatch):
     assert events[-1]["type"] == "done" and events[-1]["matched"] == 1
 
 
+async def fake_scan(client, settings, intent, criteria, query_lang, batch, usage=None):
+    # Only p1 is a strong (score-5) match.
+    return {p.id: {"score": 5, "label": "酒", "evidence_lines": ["酒入愁肠"], "note": "命中"}
+            for p in batch if p.id == "p1"}
+
+
+async def test_scan_mode_reads_in_order_and_streams_hits(monkeypatch):
+    monkeypatch.setattr(swarm, "understand_query", fake_understand)
+    monkeypatch.setattr(swarm, "scan_batch", fake_scan)
+    monkeypatch.setattr("poemferry.vectors.embed_query",
+                        lambda settings, text: np.array([1, 0], dtype=np.float32))
+
+    index = VectorIndex(["p1", "p2", "p3"],
+                        np.array([[1, 0], [0.9, 0.1], [0.8, 0.2]], dtype=np.float32))
+    settings = make_settings()
+    events = [e async for e in swarm.search_stream(
+        None, settings, NaiveRetriever(), POEMS, "哭了之后喝酒",
+        doc_index=index, retrieval_mode="scan")]
+    types = [e["type"] for e in events]
+
+    assert "scan_order" in types and "scan_wave" in types
+    assert any(e["type"] == "scan_hit" and e["poem_id"] == "p1" for e in events)
+    verdicts = [e for e in events if e["type"] == "verdict"]
+    assert [v["poem"]["id"] for v in verdicts] == ["p1"]
+    done = events[-1]
+    assert done["type"] == "done" and done["reason"] in {"satisfied", "exhausted", "diminishing"}
+    assert "read" in done and "total" in done
+
+
 async def test_fragment_channel_forces_into_shortlist(monkeypatch):
     from poemferry.fragments import FragmentIndex
 

@@ -244,6 +244,184 @@ async def _retrieve(
     return []
 
 
+# ── scan mode: deep-read in retrieval order, stream, stop when satisfied ──────
+# The funnel trims to ~30 candidates before judging, so a genuine match ranked
+# below the cut is never seen. Scan mode instead uses retrieval only to ORDER the
+# candidates, then reads their FULL TEXT best-first, accumulating matches and
+# stopping when satisfied. Reach is bounded by scan_max_read, NOT by a fixed top-N
+# — and crucially by the ORDER quality: un-embedded poems are ordered by lexical
+# signal only, so indirect-imagery matches among them can sit past max_read. The
+# stop reason is always reported so an early stop is never mistaken for "absent".
+
+SCAN_SYS = """You are a deep-reading agent in a poetry search swarm. You read the \
+FULL TEXT of candidate poems and judge how well each one answers the user's request \
+as a whole.
+
+Hard rules:
+1. NEVER translate any poem; poems stay in their original language.
+2. Judge across languages — the request is summarized in English; poems may be any \
+language.
+3. Score each poem 0-5 on genuine textual evidence: 5 = squarely answers the whole \
+request; 4 = strong match on its core; 3 = partial/related; 0-2 = weak or unrelated. \
+Most poems score low — be selective.
+4. evidence_lines: copied VERBATIM from the poem (never translated). label: a short \
+tag in the POEM'S OWN language. note: one line in the given query_lang.
+
+Respond ONLY with JSON: {"hits": [{"poem_id": "...", "score": 0-5, "label": "...", \
+"evidence_lines": ["..."], "note": "..."}]}
+Return ONLY poems scoring 3 or higher (empty array if none)."""
+
+
+def _format_poem_scan(p: Poem, max_chars: int = 1200) -> str:
+    head = f"[id={p.id}] {p.title or '(untitled)'} — {p.author or '(unknown)'} (lang={p.language})"
+    return head + "\n" + p.full_text[:max_chars]
+
+
+async def scan_batch(
+    client: AsyncOpenAI,
+    settings: Settings,
+    intent: dict,
+    criteria: list[dict],
+    query_lang: str,
+    batch: list[Poem],
+    usage: dict | None = None,
+) -> dict[str, dict]:
+    """Read a batch's full text; return {poem_id: {score, label, evidence_lines, note}}
+    for poems scoring >= 3."""
+    request = intent.get("intent_summary", "")
+    aspects = "; ".join(c.get("aspect", "") for c in criteria if c.get("aspect"))
+    poems_blob = "\n\n---\n\n".join(_format_poem_scan(p) for p in batch)
+    user = (
+        f"Request (English): {request}\n"
+        f"Aspects to match: {aspects}\n"
+        f"query_lang: {query_lang}\n\n"
+        f"Candidate poems (keep original language):\n\n{poems_blob}"
+    )
+    data = await chat_json(client, swarm_model(settings), SCAN_SYS, user, max_tokens=2000, usage=usage)
+    ids = {p.id for p in batch}
+    out: dict[str, dict] = {}
+    for h in data.get("hits", []):
+        pid = h.get("poem_id")
+        if pid not in ids:
+            continue
+        try:
+            score = max(0, min(5, int(h.get("score", 0))))
+        except (TypeError, ValueError):
+            score = 0
+        out[pid] = {
+            "score": score,
+            "label": str(h.get("label", "")),
+            "evidence_lines": [str(x) for x in h.get("evidence_lines", [])][:4],
+            "note": str(h.get("note", "")),
+        }
+    return out
+
+
+async def _reading_order(
+    client, settings, intent, description, by_id, doc_index, lexical_index, usage, emit,
+) -> list[Poem]:
+    """Full fused ranking (no trim) for scan mode. Spans every poem any channel
+    surfaced. Un-embedded poems are ordered by lexical/concept signal only."""
+    from .vectors import embed_query
+
+    intent_text = intent.get("intent_summary") or description
+    k = settings.scan_order_size
+    try:
+        doc_hits = lex_hits = []
+        concept_lists: list = []
+        if doc_index is not None:
+            dvec = await asyncio.to_thread(embed_query, settings, intent_text)
+            doc_hits = doc_index.search_unique(dvec, min(k, len(doc_index.ids)))
+        if lexical_index is not None:
+            lex_hits = lexical_index.search(description, k)
+            expanded = intent.get("expanded") or {}
+            concept_lists = [lexical_index.search(str(t), k) for t in expanded.values() if t]
+        channels: list[tuple[float, list[str]]] = []
+        if doc_hits:
+            channels.append((RRF_WEIGHTS["image"], [pid for pid, _ in doc_hits]))
+        if lex_hits:
+            channels.append((RRF_WEIGHTS["keyword"], [pid for pid, _ in lex_hits]))
+        if concept_lists:
+            channels.append((RRF_WEIGHTS["concept"], _round_robin(*concept_lists)))
+        ids = _rrf_fuse(channels)
+        return [by_id[pid] for pid in ids if pid in by_id]
+    except Exception as e:
+        await emit({"type": "error", "stage": "reading_order", "message": str(e)})
+        return []
+
+
+async def _scan_pipeline(
+    client, settings, intent, criteria, query_lang, order, forced, by_id, usage, emit,
+) -> None:
+    """Read `order` best-first in concurrent waves, accumulating matches; stop when
+    enough strong hits, the read budget is spent, or several waves find nothing new."""
+    forced_ids = {p.id for p in forced}
+    order = forced + [p for p in order if p.id not in forced_ids]
+    total = len(order)
+    await emit({"type": "scan_order", "total": total})
+    if not total:
+        await emit({"type": "done", "matched": 0, "usage": usage, "reason": "empty",
+                    "read": 0, "total": 0})
+        return
+
+    batch_size = settings.expert_batch
+    wave_size = batch_size * settings.swarm_concurrency
+    sem = asyncio.Semaphore(settings.swarm_concurrency)
+
+    async def run_batch(b):
+        async with sem:
+            try:
+                return await scan_batch(client, settings, intent, criteria, query_lang, b, usage)
+            except Exception:
+                return {}
+
+    hits: dict[str, dict] = {}
+    strong: set[str] = set()
+    read = 0
+    no_new = 0
+    reason = "exhausted"
+    i = 0
+    while i < total:
+        if len(strong) >= settings.scan_target_hits:
+            reason = "satisfied"
+            break
+        if read >= settings.scan_max_read:
+            reason = "budget"
+            break
+        if no_new >= settings.scan_patience:
+            reason = "diminishing"
+            break
+        wave = order[i : i + wave_size]
+        i += len(wave)
+        batches = [wave[j : j + batch_size] for j in range(0, len(wave), batch_size)]
+        results = await asyncio.gather(*(run_batch(b) for b in batches))
+        read += len(wave)
+        new_strong = 0
+        for res in results:
+            for pid, h in res.items():
+                if pid not in hits or h["score"] > hits[pid]["score"]:
+                    hits[pid] = h
+                if h["score"] >= settings.scan_strong_score and pid not in strong:
+                    strong.add(pid)
+                    new_strong += 1
+                    await emit({"type": "scan_hit", "poem_id": pid, "score": h["score"],
+                                "label": h["label"], "evidence": h["evidence_lines"]})
+        no_new = 0 if new_strong else no_new + 1
+        await emit({"type": "scan_wave", "read": read, "total": total, "strong": len(strong)})
+
+    ranked = sorted(hits.items(), key=lambda kv: -kv[1]["score"])
+    for pid, h in ranked[: settings.scan_target_hits]:
+        v = Verdict(
+            poem_id=pid, match=True, confidence=round(h["score"] / 5, 3),
+            matched_description_aspects=[h["label"]] if h["label"] else [],
+            evidence_lines=h["evidence_lines"][:6], explanation=h["note"],
+            explanation_lang=query_lang,
+        )
+        await emit({"type": "verdict", "verdict": v.model_dump(), "poem": by_id[pid].model_dump()})
+    await emit({"type": "done", "matched": min(len(hits), settings.scan_target_hits),
+                "usage": usage, "reason": reason, "read": read, "total": total})
+
+
 async def search_stream(
     client: AsyncOpenAI,
     settings: Settings,
@@ -291,13 +469,6 @@ async def search_stream(
             await emit({"type": "done", "matched": 0, "usage": usage})
             return
 
-        retrieved = await _retrieve(
-            client, settings, intent, description, candidates, by_id,
-            doc_index, lexical_index, mode, usage, emit,
-        )
-        await emit({"type": "retrieved", "count": len(retrieved), "mode": mode,
-                    "ids": [p.id for p in retrieved]})
-
         # Exact-fragment channel: quoted lines go straight in, ahead of vector hits.
         forced: list[Poem] = []
         if fragment_index is not None and intent.get("fragments"):
@@ -306,6 +477,22 @@ async def search_stream(
             if forced:
                 await emit({"type": "fragment_hits", "count": len(forced)})
         forced_ids = {p.id for p in forced}
+
+        if mode == "scan":
+            order = await _reading_order(
+                client, settings, intent, description, by_id, doc_index, lexical_index, usage, emit,
+            )
+            await _scan_pipeline(
+                client, settings, intent, criteria, query_lang, order, forced, by_id, usage, emit,
+            )
+            return
+
+        retrieved = await _retrieve(
+            client, settings, intent, description, candidates, by_id,
+            doc_index, lexical_index, mode, usage, emit,
+        )
+        await emit({"type": "retrieved", "count": len(retrieved), "mode": mode,
+                    "ids": [p.id for p in retrieved]})
 
         shortlist = forced + [p for p in retrieved if p.id not in forced_ids]
         shortlist = shortlist[: settings.trim_topn]

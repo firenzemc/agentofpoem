@@ -15,7 +15,7 @@ from .swarm import search_stream
 from .vectors import DOC_FILE, VectorIndex
 
 STATIC_DIR = Path(__file__).parent / "static"
-RETRIEVAL_MODES = {"image", "keyword", "concept", "hybrid"}
+RETRIEVAL_MODES = {"image", "keyword", "concept", "hybrid", "scan"}
 
 
 @asynccontextmanager
