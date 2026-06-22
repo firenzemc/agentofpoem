@@ -12,9 +12,13 @@ from .models import Poem
 
 _t2s = OpenCC("t2s")
 _LATIN = re.compile(r"[a-z]{3,}")
-_CJK_RUN = re.compile(r"[㐀-鿿]+")
-# ultra-common classical-Chinese function characters, skipped as single-char grams
-_STOP_CJK = set("的了和与與而之其於于以為为在不無无有也者乎兮即既乃且然則则")
+# CJK ideographs (kanji/hanzi) + Japanese hiragana & katakana. Without the kana
+# range, Japanese text keeps only its kanji — which then match the far larger
+# Chinese corpus, burying Japanese results. Kana are the language signature.
+_CJK_RUN = re.compile(r"[぀-ヿ㐀-鿿]+")
+# ultra-common function characters (Chinese + Japanese particles), skipped as single-char grams
+_STOP_CJK = set("的了和与與而之其於于以為为在不無无有也者乎兮即既乃且然則则"
+                "のはをにもとがでてしたなくれるうい")
 
 
 def _fold_latin(t: str) -> str:
