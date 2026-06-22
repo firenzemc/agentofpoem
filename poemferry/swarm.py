@@ -208,29 +208,25 @@ def _merge_scores(*ranked_lists) -> list[str]:
 
 async def _retrieve(
     client, settings, intent, description, candidates, by_id,
-    doc_index, line_index, lexical_index, mode, usage, emit,
+    doc_index, lexical_index, mode, usage, emit,
 ) -> list[Poem]:
     """Layer 1 — narrow candidates to ~vec_topk. Modes:
     - image:   doc index (gist+themes+images) ranked by the English intent (semantic, cross-lingual).
-    - line:    line index ranked by the raw query (line-level semantic, same-language imagery).
     - keyword: lexical term-overlap on raw text (judgment-free detail, same-language).
     - concept: lexical over the LLM concept expansion (cross-lingual + near-synonym,
                deterministic — 河流→río/Fluss/河/江/川 bridges the cross-lingual gap).
-    - hybrid:  union of image + line + keyword + concept.
+    - hybrid:  union of image + keyword + concept.
     - scout:   LLM digest swarm fallback (no embeddings)."""
     from .vectors import embed_query
 
     intent_text = intent.get("intent_summary") or description
     k = settings.vec_topk
     try:
-        doc_hits = line_hits = lex_hits = []
+        doc_hits = lex_hits = []
         concept_lists: list = []
         if mode in ("image", "hybrid") and doc_index is not None:
             dvec = await asyncio.to_thread(embed_query, settings, intent_text)
             doc_hits = doc_index.search_unique(dvec, k)
-        if mode in ("line", "hybrid") and line_index is not None:
-            lvec = await asyncio.to_thread(embed_query, settings, description)
-            line_hits = line_index.search_unique(lvec, k)
         if mode in ("keyword", "hybrid") and lexical_index is not None:
             lex_hits = lexical_index.search(description, k)
         if mode in ("concept", "hybrid") and lexical_index is not None:
@@ -239,8 +235,8 @@ async def _retrieve(
             concept_lists = [
                 lexical_index.search(str(terms), k) for terms in expanded.values() if terms
             ]
-        if doc_hits or line_hits or lex_hits or concept_lists:
-            ids = _merge_scores(doc_hits, line_hits, lex_hits, *concept_lists)
+        if doc_hits or lex_hits or concept_lists:
+            ids = _merge_scores(doc_hits, lex_hits, *concept_lists)
             return [by_id[pid] for pid in ids if pid in by_id][:k]
     except Exception as e:
         await emit({"type": "error", "stage": "retrieve", "message": str(e)})
@@ -275,7 +271,6 @@ async def search_stream(
     description: str,
     fragment_index=None,
     doc_index=None,
-    line_index=None,
     lexical_index=None,
     retrieval_mode: str | None = None,
 ) -> AsyncIterator[dict]:
@@ -317,7 +312,7 @@ async def search_stream(
 
         retrieved = await _retrieve(
             client, settings, intent, description, candidates, by_id,
-            doc_index, line_index, lexical_index, mode, usage, emit,
+            doc_index, lexical_index, mode, usage, emit,
         )
         await emit({"type": "retrieved", "count": len(retrieved), "mode": mode,
                     "ids": [p.id for p in retrieved]})

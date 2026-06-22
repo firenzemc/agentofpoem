@@ -28,3 +28,6 @@ data/*.npz
 
 # ColBERT spike cache (1.3GB, rebuild via scripts/spike_colbert.py)
 *.pkl
+
+# staged corpora awaiting the scale-up phase (enrich/embed/vector-db)
+staged/

@@ -10,8 +10,6 @@ from .models import Poem
 
 EMBED_DIR = "data"
 DOC_FILE = "embeddings_doc.npz"
-LINE_FILE = "embeddings_line.npz"
-MAX_LINES_PER_POEM = 12
 
 
 def retrieval_key(p: Poem) -> str:
@@ -32,16 +30,6 @@ def retrieval_key(p: Poem) -> str:
     if p.title or p.author:
         parts.append(f"{p.title or ''} {p.author or ''}".strip())
     return " | ".join(parts)
-
-
-def poem_lines(p: Poem) -> list[str]:
-    """Up to MAX_LINES_PER_POEM representative lines (evenly sampled for long
-    poems) for the line-level index — minimal-compression retrieval."""
-    lines = [ln.strip() for ln in p.full_text.splitlines() if len(ln.strip()) >= 4]
-    if len(lines) <= MAX_LINES_PER_POEM:
-        return lines
-    step = len(lines) / MAX_LINES_PER_POEM
-    return [lines[int(i * step)] for i in range(MAX_LINES_PER_POEM)]
 
 
 def embed_texts(settings: Settings, texts: list[str], batch_size: int = 96) -> np.ndarray:

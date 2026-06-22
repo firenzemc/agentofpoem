@@ -12,10 +12,10 @@ from .lexical import LexicalIndex
 from .llm import make_client
 from .retriever import NaiveRetriever
 from .swarm import search_stream
-from .vectors import DOC_FILE, LINE_FILE, VectorIndex
+from .vectors import DOC_FILE, VectorIndex
 
 STATIC_DIR = Path(__file__).parent / "static"
-RETRIEVAL_MODES = {"image", "line", "keyword", "concept", "hybrid", "scout"}
+RETRIEVAL_MODES = {"image", "keyword", "concept", "hybrid", "scout"}
 
 
 @asynccontextmanager
@@ -27,7 +27,6 @@ async def lifespan(app: FastAPI):
     app.state.retriever = NaiveRetriever()
     app.state.fragment_index = FragmentIndex(app.state.poems)
     app.state.doc_index = VectorIndex.load(DOC_FILE)
-    app.state.line_index = VectorIndex.load(LINE_FILE)
     app.state.lexical_index = LexicalIndex(app.state.poems)
     yield
 
@@ -51,7 +50,6 @@ async def info() -> dict:
         "retrieval": s.retrieval_mode,
         "modes": sorted(RETRIEVAL_MODES),
         "doc_indexed": len(app.state.doc_index.ids) if app.state.doc_index else 0,
-        "line_vectors": len(app.state.line_index.ids) if app.state.line_index else 0,
     }
 
 
@@ -104,7 +102,6 @@ async def search(
             q,
             fragment_index=app.state.fragment_index,
             doc_index=app.state.doc_index,
-            line_index=app.state.line_index,
             lexical_index=app.state.lexical_index,
             retrieval_mode=mode,
         )
