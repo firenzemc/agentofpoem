@@ -28,8 +28,15 @@ Respond ONLY with a JSON object with exactly these keys:
 - lang_hint: array of language codes — ONLY when the user EXPLICITLY asks for a
   language (e.g. "a French poem"). Otherwise null. Never infer it from the language
   the user happens to be writing in; matching is cross-lingual by design.
+- expanded: a JSON object mapping each language code (zh, en, ja, fr, de, es, it) to a
+  short space-separated string of the query's CONCRETE concepts in that language,
+  INCLUDING near-synonyms. This builds a deterministic cross-lingual keyword bridge:
+  e.g. for "river" → {"zh":"河 江 川 河流 水","en":"river stream brook",
+  "fr":"fleuve rivière ruisseau","de":"Fluss Strom Bach","es":"río arroyo",
+  "it":"fiume ruscello","ja":"川 河"}. Only concrete content words/images; skip moods.
+  Empty strings for languages where the concept has no good term.
 
-Do not add extra keys. Do not translate; just analyze."""
+Output exactly these keys. Do not translate the poems; just analyze the query."""
 
 EXPERT_SYS = """You are a specialist agent in a poetry-judging swarm. You verify ONE \
 criterion against candidate poems.
@@ -207,7 +214,9 @@ async def _retrieve(
     - image:   doc index (gist+themes+images) ranked by the English intent (semantic, cross-lingual).
     - line:    line index ranked by the raw query (line-level semantic, same-language imagery).
     - keyword: lexical term-overlap on raw text (judgment-free detail, same-language).
-    - hybrid:  union of image + line + keyword.
+    - concept: lexical over the LLM concept expansion (cross-lingual + near-synonym,
+               deterministic — 河流→río/Fluss/河/江/川 bridges the cross-lingual gap).
+    - hybrid:  union of image + line + keyword + concept.
     - scout:   LLM digest swarm fallback (no embeddings)."""
     from .vectors import embed_query
 
@@ -215,6 +224,7 @@ async def _retrieve(
     k = settings.vec_topk
     try:
         doc_hits = line_hits = lex_hits = []
+        concept_lists: list = []
         if mode in ("image", "hybrid") and doc_index is not None:
             dvec = await asyncio.to_thread(embed_query, settings, intent_text)
             doc_hits = doc_index.search_unique(dvec, k)
@@ -223,8 +233,14 @@ async def _retrieve(
             line_hits = line_index.search_unique(lvec, k)
         if mode in ("keyword", "hybrid") and lexical_index is not None:
             lex_hits = lexical_index.search(description, k)
-        if doc_hits or line_hits or lex_hits:
-            ids = _merge_scores(doc_hits, line_hits, lex_hits)
+        if mode in ("concept", "hybrid") and lexical_index is not None:
+            expanded = intent.get("expanded") or {}
+            # one ranked list per language → round-robin merge keeps languages balanced
+            concept_lists = [
+                lexical_index.search(str(terms), k) for terms in expanded.values() if terms
+            ]
+        if doc_hits or line_hits or lex_hits or concept_lists:
+            ids = _merge_scores(doc_hits, line_hits, lex_hits, *concept_lists)
             return [by_id[pid] for pid in ids if pid in by_id][:k]
     except Exception as e:
         await emit({"type": "error", "stage": "retrieve", "message": str(e)})

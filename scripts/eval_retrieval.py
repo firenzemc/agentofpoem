@@ -58,6 +58,7 @@ def load_queries() -> list[dict]:
 async def retrieve(mode, q, reps, settings, doc, line, lex, k) -> list[str]:
     intent_text = reps["intent"]  # English LLM intent
     xling = reps["xling"]  # multilingual translated terms
+    expanded = reps.get("expanded") or {}  # {lang: terms w/ near-synonyms} from understand
     if mode == "image":  # English pivot: EN intent vs EN gist
         return [pid for pid, _ in doc.search_unique(embed_query(settings, intent_text), k)]
     if mode == "image_native":  # idea 1: raw native query vs EN gist (no English pivot)
@@ -66,6 +67,15 @@ async def retrieve(mode, q, reps, settings, doc, line, lex, k) -> list[str]:
         return [pid for pid, _ in line.search_unique(embed_query(settings, q), k)]
     if mode == "keyword":
         return [pid for pid, _ in lex.search(q, k)]
+    if mode == "concept":  # concept expansion: per-lang near-synonym lexical, round-robin
+        lists = [lex.search(str(t), k) for t in expanded.values() if t]
+        return _merge_scores(*lists)[:k] if lists else []
+    if mode == "hybrid_c":  # hybrid + concept channel
+        d = doc.search_unique(embed_query(settings, intent_text), k)
+        line_h = line.search_unique(embed_query(settings, q), k)
+        kw = lex.search(q, k)
+        cl = [lex.search(str(t), k) for t in expanded.values() if t]
+        return _merge_scores(d, line_h, kw, *cl)[:k]
     if mode == "xlingual_kw":  # idea 2: translate to every language, keyword-union
         return [pid for pid, _ in lex.search(xling, k)]
     if mode == "xlingual_line":  # translated terms vs raw poem lines (dense, per-lang)
@@ -103,13 +113,16 @@ async def main() -> None:
 
     # per-query reps: English LLM intent (pivot) + multilingual translated terms
     reps = {}
+    need_xling = any(m in ("xlingual_kw", "xlingual_line") for m in modes)
     for qq in queries:
         try:
-            intent = (await understand_query(client, settings, qq["q"])).get("intent_summary") or qq["q"]
+            u = await understand_query(client, settings, qq["q"])
+            intent = u.get("intent_summary") or qq["q"]
+            expanded = u.get("expanded") or {}
         except Exception:
-            intent = qq["q"]
-        xling = await translate_terms(client, settings, qq["q"])
-        reps[qq["id"]] = {"intent": intent, "xling": xling}
+            intent, expanded = qq["q"], {}
+        xling = await translate_terms(client, settings, qq["q"]) if need_xling else ""
+        reps[qq["id"]] = {"intent": intent, "xling": xling, "expanded": expanded}
 
     totals = {m: 0.0 for m in modes}
     print(f"\n{'query':<26} " + " ".join(f"{m:>11}" for m in modes))
