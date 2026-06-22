@@ -157,10 +157,18 @@ def _chunk(items: list, size: int, max_chunks: int) -> list[list]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
-def _merge_scores(*ranked_lists) -> list[str]:
-    """Round-robin interleave of ranked id lists, deduped. Rank-based (not raw
-    score) so channels on different scales — cosine vs idf sums — contribute
-    equally: each channel's #1 first, then every #2, and so on."""
+# RRF fusion weights. The semantic (image) channel carries cross-lingual and
+# indirect-imagery matches that the lexical channels structurally cannot — e.g.
+# "在晚上喝酒" → 月下独酌 ranks 20 by gist but 28000+ by raw-text overlap. So image
+# is weighted above keyword/concept; the lexical channels still count (they're the
+# only coverage for the un-embedded corpus and for exact surface detail), just less.
+RRF_K = 60
+RRF_WEIGHTS = {"image": 1.0, "keyword": 0.5, "concept": 0.7}
+
+
+def _round_robin(*ranked_lists) -> list[str]:
+    """Interleave ranked id lists, deduped: each list's #1 first, then every #2, …
+    Used to fold the per-language concept lists into one balanced ranking."""
     from itertools import zip_longest
 
     out: list[str] = []
@@ -172,6 +180,19 @@ def _merge_scores(*ranked_lists) -> list[str]:
                 seen.add(pid)
                 out.append(pid)
     return out
+
+
+def _rrf_fuse(channels: list[tuple[float, list[str]]], k: int = RRF_K) -> list[str]:
+    """Weighted Reciprocal Rank Fusion. score(p) = Σ_c weight_c / (k + rank_c(p)).
+
+    Unlike round-robin, a poem ranked high in ONE channel keeps a high score, so a
+    strong semantic hit isn't diluted by the other channels' top entries (the bug
+    that buried 月下独酌 at merged-rank 255). Channels agreeing compounds the score."""
+    scores: dict[str, float] = {}
+    for weight, ids in channels:
+        for rank, pid in enumerate(ids):
+            scores[pid] = scores.get(pid, 0.0) + weight / (k + rank)
+    return sorted(scores, key=lambda p: -scores[p])
 
 
 async def _retrieve(
@@ -204,7 +225,16 @@ async def _retrieve(
                 lexical_index.search(str(terms), k) for terms in expanded.values() if terms
             ]
         if doc_hits or lex_hits or concept_lists:
-            ids = _merge_scores(doc_hits, lex_hits, *concept_lists)
+            channels: list[tuple[float, list[str]]] = []
+            if doc_hits:
+                channels.append((RRF_WEIGHTS["image"], [pid for pid, _ in doc_hits]))
+            if lex_hits:
+                channels.append((RRF_WEIGHTS["keyword"], [pid for pid, _ in lex_hits]))
+            if concept_lists:
+                # fold the per-language concept lists into one channel so concept
+                # counts once, not once per language (the 9-column dilution bug).
+                channels.append((RRF_WEIGHTS["concept"], _round_robin(*concept_lists)))
+            ids = _rrf_fuse(channels)
             return [by_id[pid] for pid in ids if pid in by_id][:k]
     except Exception as e:
         await emit({"type": "error", "stage": "retrieve", "message": str(e)})

@@ -21,7 +21,12 @@ from poemferry.config import load_settings  # noqa: E402
 from poemferry.corpus import load_poems  # noqa: E402
 from poemferry.lexical import LexicalIndex  # noqa: E402
 from poemferry.llm import make_client  # noqa: E402
-from poemferry.swarm import _merge_scores, understand_query  # noqa: E402
+from poemferry.swarm import (  # noqa: E402
+    RRF_WEIGHTS,
+    _rrf_fuse,
+    _round_robin,
+    understand_query,
+)
 from poemferry.vectors import DOC_FILE, VectorIndex, embed_query  # noqa: E402
 
 K = 30
@@ -41,11 +46,17 @@ async def retrieve(mode, q, reps, settings, doc, lex, k) -> list[str]:
     if mode == "keyword":  # lexical term-overlap on raw text (same-language detail)
         return [pid for pid, _ in lex.search(q, k)]
     if mode == "concept":  # cross-lingual near-synonym expansion
-        return _merge_scores(*concept)[:k] if concept else []
-    if mode == "hybrid":  # production: image + keyword + concept
+        return _round_robin(*concept)[:k] if concept else []
+    if mode == "hybrid":  # production: weighted RRF over image + keyword + concept
         d = doc.search_unique(embed_query(settings, intent_text), k)
         kw = lex.search(q, k)
-        return _merge_scores(d, kw, *concept)[:k]
+        channels = [
+            (RRF_WEIGHTS["image"], [pid for pid, _ in d]),
+            (RRF_WEIGHTS["keyword"], [pid for pid, _ in kw]),
+        ]
+        if concept:
+            channels.append((RRF_WEIGHTS["concept"], _round_robin(*concept)))
+        return _rrf_fuse(channels)[:k]
     raise ValueError(mode)
 
 

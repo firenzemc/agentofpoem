@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from openai import AsyncOpenAI
@@ -33,20 +34,30 @@ async def chat_json(
     When a `usage` dict is given, token counts (incl. DeepSeek prefix-cache
     hits) are accumulated into it.
     """
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-        max_tokens=max_tokens,
-    )
-    if usage is not None and resp.usage:
-        usage["prompt"] = usage.get("prompt", 0) + (resp.usage.prompt_tokens or 0)
-        usage["completion"] = usage.get("completion", 0) + (resp.usage.completion_tokens or 0)
-        cache_hit = getattr(resp.usage, "prompt_cache_hit_tokens", 0) or 0
-        usage["cache_hit"] = usage.get("cache_hit", 0) + cache_hit
-    content = resp.choices[0].message.content or "{}"
-    return json.loads(content)
+    # v4-flash occasionally returns truncated/invalid JSON even in json_object mode;
+    # one malformed reply shouldn't abort a whole search. Retry a couple of times.
+    last_err: Exception | None = None
+    for attempt in range(3):
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=max_tokens,
+        )
+        if usage is not None and resp.usage:
+            usage["prompt"] = usage.get("prompt", 0) + (resp.usage.prompt_tokens or 0)
+            usage["completion"] = usage.get("completion", 0) + (resp.usage.completion_tokens or 0)
+            cache_hit = getattr(resp.usage, "prompt_cache_hit_tokens", 0) or 0
+            usage["cache_hit"] = usage.get("cache_hit", 0) + cache_hit
+        content = resp.choices[0].message.content or "{}"
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            last_err = e
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (attempt + 1))
+    raise last_err
