@@ -1,5 +1,6 @@
 import math
 import re
+import unicodedata
 
 from opencc import OpenCC
 
@@ -16,9 +17,17 @@ _CJK_RUN = re.compile(r"[㐀-鿿]+")
 _STOP_CJK = set("的了和与與而之其於于以為为在不無无有也者乎兮即既乃且然則则")
 
 
+def _fold_latin(t: str) -> str:
+    """Strip diacritics and fold ß so accented words tokenize: río→rio, Fluß→fluss,
+    été→ete. Without this, [a-z]{3,} silently drops every accented word."""
+    t = t.replace("ß", "ss")
+    t = unicodedata.normalize("NFD", t)
+    return "".join(c for c in t if unicodedata.category(c) != "Mn")
+
+
 def _grams(text: str) -> set[str]:
     t = _t2s.convert(text.lower())
-    grams: set[str] = set(_LATIN.findall(t))
+    grams: set[str] = set(_LATIN.findall(_fold_latin(t)))
     for run in _CJK_RUN.findall(t):
         for ch in run:
             if ch not in _STOP_CJK:
