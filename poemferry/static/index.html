@@ -73,7 +73,7 @@
 <header>
   <h1>诗 渡</h1>
   <p class="mono">CROSS-LINGUAL POETRY SWARM · 任意语言描述，漏斗逐层点亮全库诗海 · 仅原文不译</p>
-  <nav class="tabs"><a id="tab-search" class="on">寻 诗</a><a id="tab-browse">览 诗</a></nav>
+  <nav class="tabs"><a id="tab-search" class="on">寻 诗</a><a id="tab-browse">览 诗</a><a id="tab-thanks">致 谢</a></nav>
 </header>
 
 <div class="wrap" id="view-search">
@@ -103,6 +103,11 @@
     </div>
   </div>
   <div class="winners" id="winners"></div>
+</div>
+
+<div class="wrap" id="view-thanks" style="display:none">
+  <p class="hint mono" style="margin:14px 0">本站诗词全部来自以下公共领域 / 开放许可的语料源，谨此致谢。点击可访问出处。</p>
+  <div id="thanksList"></div>
 </div>
 
 <div class="wrap" id="view-browse" style="display:none">
@@ -232,9 +237,22 @@ $("q").addEventListener("keydown",e=>{ if(e.key==="Enter") startSearch(); });
 
 /* ── browse ── */
 const browse={language:"",author:"",page:1,langs:[]};
-function showView(n){ $("view-search").style.display=n==="search"?"":"none"; $("view-browse").style.display=n==="browse"?"":"none";
-  $("tab-search").className=n==="search"?"on":""; $("tab-browse").className=n==="browse"?"on":""; if(n==="browse") loadBrowse(); }
+function showView(n){
+  for(const v of ["search","browse","thanks"]) $("view-"+v).style.display=n===v?"":"none";
+  for(const v of ["search","browse","thanks"]) $("tab-"+v).className=n===v?"on":"";
+  if(n==="browse") loadBrowse(); if(n==="thanks") loadThanks(); }
 $("tab-search").onclick=()=>showView("search"); $("tab-browse").onclick=()=>showView("browse");
+$("tab-thanks").onclick=()=>showView("thanks");
+
+async function loadThanks(){
+  const d=await fetch("/api/sources").then(r=>r.json());
+  $("thanksList").innerHTML=`<div class="hint mono" style="margin-bottom:10px">共 ${d.total} 首 · ${d.sources.length} 个语料源</div>`+
+    d.sources.map(s=>{
+      const link=s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.source)}</a>`:esc(s.source);
+      return `<div class="wcard"><div class="meta"><b>${link}</b> · ${s.count} 首 · ${s.languages.map(l=>LANG[l]||l).join("/")}</div>
+        <div class="src mono">license: ${esc(s.license)}</div></div>`;
+    }).join("");
+}
 function bcard(p){ const src=p.source_url?`<a href="${esc(p.source_url)}" target="_blank" rel="noopener">${esc(p.source_name)}</a>`:esc(p.source_name);
   return `<div class="wcard"><div class="meta"><b>${esc(p.title||"无题")}</b> · ${esc(p.author||"佚名")} · ${esc(p.era||"")} · ${esc(LANG[p.language]||p.language)}</div>${poemBlock(p.full_text,[])}<div class="src mono">src ${src} · license ${esc(p.license)}</div></div>`; }
 async function loadBrowse(){

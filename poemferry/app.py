@@ -53,6 +53,23 @@ async def info() -> dict:
     }
 
 
+@app.get("/api/sources")
+async def sources() -> dict:
+    """Acknowledgments: every corpus source with its poem count, link and license,
+    auto-generated from per-poem metadata (license-compliant attribution)."""
+    agg: dict[str, dict] = {}
+    for p in app.state.poems:
+        s = agg.setdefault(p.source_name, {"count": 0, "url": p.source_url, "license": p.license,
+                                            "languages": set()})
+        s["count"] += 1
+        s["languages"].add(p.language)
+    out = [{"source": k, "count": v["count"], "url": v["url"], "license": v["license"],
+            "languages": sorted(v["languages"])}
+           for k, v in agg.items()]
+    out.sort(key=lambda d: -d["count"])
+    return {"sources": out, "total": len(app.state.poems)}
+
+
 @app.get("/api/corpus")
 async def corpus() -> dict:
     """Ordered poem ids + language, for the funnel dot-grid visualization."""
