@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.env
+.DS_Store
+plans
+
+# colbert spike cache (1.3GB) — not needed in prod image
+*.pkl
+staged

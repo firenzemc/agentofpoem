@@ -22,3 +22,15 @@ __pycache__/
 # Editors
 .vscode/
 .idea/
+
+# built embedding indices (rebuild via scripts/build_embeddings.py)
+data/*.npz
+
+# ColBERT spike cache (1.3GB, rebuild via scripts/spike_colbert.py)
+*.pkl
+
+# staged corpora awaiting the scale-up phase (enrich/embed/vector-db)
+staged/
+
+# corpus files — rebuildable via scripts/ingest_*.py; not shipped in git (open-source = scripts not DB)
+data/*.jsonl
