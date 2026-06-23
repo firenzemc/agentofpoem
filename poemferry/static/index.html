@@ -84,6 +84,7 @@
       <option value="image">语义(gist+意象)</option>
       <option value="keyword">关键词(字面)</option>
       <option value="concept">概念扩展(跨语言)</option>
+      <option value="scan">深扫(读到满意即停)</option>
     </select>
     <button id="go">寻 诗</button>
   </div>
@@ -200,6 +201,9 @@ function startSearch(){
         setC(`<span class="dim">[${esc(m.mode)}] 向量召回</span> ${m.count} 首 → 锁定`);
         break;
       case "fragment_hits": setC(`<span class="dim">原句精确命中</span> ${m.count} 首 → 直通精读`); break;
+      case "scan_order": setC(`<span class="dim">深扫 · 按检索顺序排定阅读</span> ${m.total} 首待读…`); break;
+      case "scan_wave": setC(`<span class="dim">深扫精读中</span> 已读 <b>${m.read}</b>/${m.total} 首 · 强命中 ${m.strong}`); break;
+      case "scan_hit": grid.flare(m.poem_id,"imagery"); break;
       case "shortlist":
         grid.onlyLevel((m.cards||[]).map(c=>c.id),2);
         document.querySelectorAll(".enode").forEach(n=>n.classList.add("live"));
@@ -216,7 +220,10 @@ function startSearch(){
         state.winners.sort((a,b)=>(b.verdict.confidence||0)-(a.verdict.confidence||0));
         $("winners").innerHTML=state.winners.length?state.winners.map(w=>appreciation(w.verdict,w.poem)).join(""):'<div class="empty">蜂群未捞到符合的诗，换个描述或检索方式再试。</div>';
         const u=m.usage||{}; const tok=u.prompt?((u.prompt+(u.completion||0))/1000).toFixed(1)+"k tok":"";
-        setC(`<span class="dim">提取完成</span> · 命中 <b>${m.matched}</b> 首 · ${tok}`);
+        const REASON={satisfied:"已读到满意即停",budget:"达阅读上限",diminishing:"收益递减停止",exhausted:"已读完候选",empty:"无候选"};
+        const readinfo=(m.read!=null&&m.total)?` · 读了 ${m.read}/${m.total} 首`:"";
+        const reason=m.reason?` · ${REASON[m.reason]||m.reason}`:"";
+        setC(`<span class="dim">提取完成</span> · 命中 <b>${m.matched}</b> 首${readinfo}${reason} · ${tok}`);
         es.close(); $("go").disabled=false; break;
       case "error": setC(`<span style="color:var(--magenta)">[${m.stage||"err"}] ${esc(m.message||"")}</span>`); break;
     }

@@ -27,6 +27,12 @@ class Settings:
     glm_base_url: str
     glm_api_key: str
     glm_model: str
+    # scan mode: read full text in retrieval-order until satisfied (see swarm.scan_stream)
+    scan_order_size: int = 1500
+    scan_max_read: int = 768
+    scan_target_hits: int = 12
+    scan_patience: int = 3
+    scan_strong_score: int = 4
 
 
 def load_settings() -> Settings:
@@ -51,4 +57,9 @@ def load_settings() -> Settings:
         glm_base_url=os.environ.get("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
         glm_api_key=os.environ.get("GLM_API_KEY", ""),
         glm_model=os.environ.get("GLM_MODEL", "glm-4.7-flash"),
+        scan_order_size=int(os.environ.get("SCAN_ORDER_SIZE", "1500")),
+        scan_max_read=int(os.environ.get("SCAN_MAX_READ", "768")),
+        scan_target_hits=int(os.environ.get("SCAN_TARGET_HITS", "12")),
+        scan_patience=int(os.environ.get("SCAN_PATIENCE", "3")),
+        scan_strong_score=int(os.environ.get("SCAN_STRONG_SCORE", "4")),
     )
