@@ -28,3 +28,6 @@ staged/
 
 # corpus files — rebuildable via scripts/ingest_*.py; not shipped in git (open-source = scripts not DB)
 data/*.jsonl
+
+# local agent protocol — kept out of the public repo
+CLAUDE.md
