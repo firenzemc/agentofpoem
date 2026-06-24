@@ -6,12 +6,6 @@
 .env.*
 !.env.example
 
-# Node
-node_modules/
-dist/
-build/
-*.log
-
 # Python
 __pycache__/
 *.pyc
