@@ -25,7 +25,11 @@ def main() -> None:
     settings = load_settings()
     if not settings.embed_api_key:
         sys.exit("EMBED_API_KEY is not set")
-    build_doc(settings, load_poems(settings.poems_path))
+    # Only enriched poems get a doc vector: retrieval_key needs an English gist to
+    # stay in the query's English-intent space. Un-enriched poems fall back to raw
+    # text (a different vector space) and are served by the lexical channels instead.
+    poems = [p for p in load_poems(settings.poems_path) if (p.enrichment or {}).get("gist")]
+    build_doc(settings, poems)
 
 
 if __name__ == "__main__":

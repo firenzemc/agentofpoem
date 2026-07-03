@@ -10,6 +10,10 @@ from .models import Poem
 
 EMBED_DIR = "data"
 DOC_FILE = "embeddings_doc.npz"
+# The doc index is stored float16 to halve resident RAM (376k×1536 → 1.16GB vs
+# 2.31GB). A float16 @ float32 matmul would transiently upcast the whole matrix
+# back to float32, so search casts one row-block at a time to bound the spike.
+SEARCH_CHUNK = 50000
 
 
 def retrieval_key(p: Poem) -> str:
@@ -78,7 +82,7 @@ class VectorIndex:
         return cls(json.loads(str(npz["ids"].item())), npz["matrix"])
 
     def search_unique(self, query_vec: np.ndarray, k: int) -> list[tuple[str, float]]:
-        scores = self.matrix @ query_vec
+        scores = self._scores(query_vec)
         order = np.argsort(-scores)
         out: list[tuple[str, float]] = []
         seen: set[str] = set()
@@ -92,7 +96,22 @@ class VectorIndex:
                 break
         return out
 
+    def _scores(self, query_vec: np.ndarray) -> np.ndarray:
+        """Cosine scores over the whole index. If the matrix is float16, compute
+        block-by-block (casting each block to float32) so the matmul never upcasts
+        the entire matrix at once."""
+        q = query_vec.astype(np.float32)
+        if self.matrix.dtype != np.float16:
+            return self.matrix @ q
+        n = self.matrix.shape[0]
+        scores = np.empty(n, dtype=np.float32)
+        for i in range(0, n, SEARCH_CHUNK):
+            block = self.matrix[i : i + SEARCH_CHUNK]
+            scores[i : i + SEARCH_CHUNK] = block.astype(np.float32) @ q
+        return scores
+
 
 def save_index(ids: list[str], matrix: np.ndarray, filename: str) -> None:
+    # float16 halves the on-disk and resident size; search casts per-block.
     np.savez(Path(EMBED_DIR) / filename,
-             ids=np.asarray(json.dumps(ids)), matrix=matrix.astype(np.float32))
+             ids=np.asarray(json.dumps(ids)), matrix=matrix.astype(np.float16))

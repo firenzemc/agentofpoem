@@ -86,6 +86,7 @@
       <option value="concept">概念扩展(跨语言)</option>
       <option value="scan">深扫(读到满意即停)</option>
     </select>
+    <select id="lang" title="限定语言"><option value="">全部语言</option></select>
     <button id="go">寻 诗</button>
   </div>
   <div class="hint mono" id="hint">corpus loading…</div>
@@ -172,6 +173,7 @@ document.addEventListener("click",e=>{ if(!e.target.classList.contains("unfold")
 fetch("/api/info").then(r=>r.json()).then(d=>{
   $("hint").textContent=`corpus ${d.poem_count} · ${d.languages.join("/")} · doc ${d.doc_indexed} · line ${d.line_vectors} · model ${d.model}`;
   if(d.retrieval) $("mode").value=d.retrieval;
+  d.languages.forEach(l=>{const o=document.createElement("option");o.value=l;o.textContent=LANG[l]||l;$("lang").appendChild(o);});
 });
 fetch("/api/corpus").then(r=>r.json()).then(d=>grid.setCorpus(d.ids)).catch(()=>{});
 
@@ -187,7 +189,8 @@ function startSearch(){
   grid.reset(); grid.start(); $("go").disabled=true;
   setC('<span class="dim">理解描述 · 向量打捞全库…</span>');
   const mode=$("mode").value;
-  es=new EventSource(`/api/search?retrieval=${mode}&q=`+encodeURIComponent(q));
+  const lang=$("lang").value;
+  es=new EventSource(`/api/search?retrieval=${mode}${lang?`&lang=${lang}`:""}&q=`+encodeURIComponent(q));
   es.onmessage=ev=>{
     const m=JSON.parse(ev.data);
     switch(m.type){

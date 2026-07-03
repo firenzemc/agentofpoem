@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.client = make_client(settings)
     app.state.poems = load_poems(settings.poems_path)
+    app.state.languages = {p.language for p in app.state.poems}
     app.state.retriever = NaiveRetriever()
     app.state.fragment_index = FragmentIndex(app.state.poems)
     app.state.doc_index = VectorIndex.load(DOC_FILE)
@@ -107,8 +108,10 @@ async def browse(
 async def search(
     q: str = Query(..., min_length=1),
     retrieval: str | None = Query(None),
+    lang: str | None = Query(None),
 ) -> StreamingResponse:
     mode = retrieval if retrieval in RETRIEVAL_MODES else None
+    lang_filter = lang if lang in app.state.languages else None
 
     async def event_gen():
         stream = search_stream(
@@ -121,6 +124,7 @@ async def search(
             doc_index=app.state.doc_index,
             lexical_index=app.state.lexical_index,
             retrieval_mode=mode,
+            lang_filter=lang_filter,
         )
         async for event in stream:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
