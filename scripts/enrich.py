@@ -56,6 +56,12 @@ async def enrich_one(client, settings, sem, record: dict, usage: dict) -> None:
         except Exception as e:
             print(f"  ! {record['id']}: {e}")
             return
+        # v4-flash occasionally wraps the object in a JSON array; tolerate it
+        # instead of crashing the whole run.
+        if isinstance(data, list):
+            data = data[0] if data and isinstance(data[0], dict) else {}
+        if not isinstance(data, dict):
+            return
         gist = str(data.get("gist", "")).strip()
         if gist:
             record["enrichment"] = {
