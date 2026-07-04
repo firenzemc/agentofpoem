@@ -85,6 +85,7 @@
       <option value="keyword">关键词(字面)</option>
       <option value="concept">概念扩展(跨语言)</option>
       <option value="scan">深扫(读到满意即停)</option>
+      <option value="exact">严格全文(词对词)</option>
     </select>
     <select id="lang" title="限定语言"><option value="">全部语言</option></select>
     <button id="go">寻 诗</button>
@@ -204,6 +205,7 @@ function startSearch(){
         setC(`<span class="dim">[${esc(m.mode)}] 向量召回</span> ${m.count} 首 → 锁定`);
         break;
       case "fragment_hits": setC(`<span class="dim">原句精确命中</span> ${m.count} 首 → 直通精读`); break;
+      case "exact_hits": grid.setLevel(m.ids||[],1); setC(`<span class="dim">严格全文 · 词对词命中</span> ${m.count} 首${m.count>m.shown?`（显示前 ${m.shown}）`:""}`); break;
       case "scan_order": setC(`<span class="dim">深扫 · 按检索顺序排定阅读</span> ${m.total} 首待读…`); break;
       case "scan_wave": setC(`<span class="dim">深扫精读中</span> 已读 <b>${m.read}</b>/${m.total} 首 · 强命中 ${m.strong}`); break;
       case "scan_hit": grid.flare(m.poem_id,"imagery"); break;

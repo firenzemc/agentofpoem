@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
 
 from .config import Settings
+from .fragments import FragmentIndex, normalize
 from .llm import chat_json, swarm_model
 from .models import Poem, Verdict
 from .retriever import Retriever
@@ -434,6 +435,47 @@ async def _scan_pipeline(
                 "usage": usage, "reason": reason, "read": read, "total": total})
 
 
+# ── exact mode: strict word-for-word full-text search, zero LLM ───────────────
+# Returns poems whose full text literally contains the WHOLE query as one contiguous
+# substring (normalized: whitespace/punctuation dropped, lowercased, trad→simp), most
+# occurrences first. No query understanding, no swarm — just the literal matches.
+
+EXACT_LIMIT = 60
+
+
+def _exact_evidence(poem: Poem, needle: str) -> list[str]:
+    lines = [ln for ln in poem.full_text.splitlines() if needle in normalize(ln)]
+    return lines or poem.full_text.splitlines()[:2]
+
+
+async def _exact_pipeline(description, poems, fragment_index, lang_filter, usage, emit) -> None:
+    if fragment_index is None:
+        fragment_index = FragmentIndex(poems)
+    hits = fragment_index.search_exact(description)
+    by_id = {p.id: p for p in poems}
+    needle = normalize(description)
+    verdicts: list[Verdict] = []
+    for pid, count in hits:
+        p = by_id.get(pid)
+        if p is None or (lang_filter and p.language != lang_filter):
+            continue
+        verdicts.append(Verdict(
+            poem_id=pid, match=True, confidence=1.0,
+            matched_description_aspects=[description.strip()],
+            evidence_lines=_exact_evidence(p, needle)[:6],
+            explanation=f"全文精确包含「{description.strip()}」（{count} 处）",
+            explanation_lang="",
+        ))
+        if len(verdicts) >= EXACT_LIMIT:
+            break
+    await emit({"type": "exact_hits", "count": len(hits), "shown": len(verdicts),
+                "ids": [v.poem_id for v in verdicts]})
+    for v in verdicts:
+        await emit({"type": "verdict", "verdict": v.model_dump(),
+                    "poem": by_id[v.poem_id].model_dump()})
+    await emit({"type": "done", "matched": len(verdicts), "usage": usage})
+
+
 async def search_stream(
     client: AsyncOpenAI,
     settings: Settings,
@@ -462,6 +504,9 @@ async def search_stream(
     async def pipeline() -> None:
         await emit({"type": "start", "description": description})
         usage: dict = {}
+        if mode == "exact":
+            await _exact_pipeline(description, poems, fragment_index, lang_filter, usage, emit)
+            return
         try:
             intent = await understand_query(client, settings, description, usage)
         except Exception as e:

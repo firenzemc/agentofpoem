@@ -186,3 +186,27 @@ async def test_lang_filter_restricts_corpus_to_one_language(monkeypatch):
         doc_index=index, lang_filter="en")]
     ids = {v["poem"]["id"] for v in events if v["type"] == "verdict"}
     assert ids == {"p3"}
+
+
+async def test_exact_mode_literal_folded_and_lang_filtered():
+    from poemferry.fragments import FragmentIndex
+    poems = POEMS + [Poem(id="p4", title="T", author="W", language="zh",
+                          full_text="在天願作比翼鳥", source_name="s", license="PD")]
+    fi = FragmentIndex(poems)
+
+    async def run(q, **kw):
+        # client=None: if the exact branch wrongly called the LLM it would crash,
+        # proving the mode is zero-LLM.
+        return [e async for e in swarm.search_stream(
+            None, make_settings(), NaiveRetriever(), poems, q,
+            fragment_index=fi, retrieval_mode="exact", **kw)]
+
+    def verdict_ids(events):
+        return [e["poem"]["id"] for e in events if e["type"] == "verdict"]
+
+    ev = await run("愁肠")
+    assert verdict_ids(ev) == ["p1"] and any(e["type"] == "exact_hits" for e in ev)
+    # simplified query folds to hit the traditional poem
+    assert verdict_ids(await run("在天愿作比翼鸟")) == ["p4"]
+    # language filter drops matches in other languages
+    assert verdict_ids(await run("愁肠", lang_filter="en")) == []
