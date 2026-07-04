@@ -4,271 +4,732 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>诗渡 · PoemFerry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Serif:ital,wght@0,400;0,500;1,400&family=Noto+Serif+SC:wght@400;500&family=Noto+Serif+JP:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg:#05070d; --panel:#0b0f17; --panel2:#10151f; --line:#1c2636;
-    --cyan:#36e6e0; --magenta:#ff4d9d; --gold:#ffd24d; --ink:#cdd9e8; --muted:#5d6e85;
-    --k-emotion:#ff4d6d; --k-action:#4da6ff; --k-imagery:#ffd24d; --k-setting:#4dffa6; --k-sequence:#b96dff;
+  :root{
+    --bg:#070910; --canvas:#080b12; --card1:#141a23; --card2:#0e121a;
+    --mint:#5EE6C4; --amber:#E8B15E; --amber-t:#F3D9A6;
+    --poem:#d9d2c2; --title:#EDE4D3;
+    --t1:#e8ecf2; --t2:#c7cedb; --t3:#8a94a6; --t4:#56607a; --t5:#3a4152;
+    --line:rgba(255,255,255,.07);
+    --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --serif-cjk:"Noto Serif SC","Noto Serif JP","Songti SC",serif;
+    --serif-jp:"Noto Serif JP","Noto Serif SC",serif;
+    --serif-la:"Noto Serif",Georgia,serif;
   }
-  * { box-sizing:border-box; }
-  html,body { margin:0; background:var(--bg); color:var(--ink);
-    font-family:"Songti SC","Noto Serif CJK SC",Georgia,serif; }
-  .mono { font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace; }
-  a { color:var(--cyan); }
-  header { padding:20px 20px 6px; text-align:center; }
-  header h1 { margin:0; font-size:27px; letter-spacing:10px; color:#eaf6ff; text-shadow:0 0 12px rgba(54,230,224,.5); }
-  header p { margin:6px 0 0; color:var(--muted); font-size:12px; letter-spacing:1px; }
-  nav.tabs { display:flex; justify-content:center; gap:26px; margin-top:10px; }
-  nav.tabs a { color:var(--muted); cursor:pointer; font-size:14px; letter-spacing:3px; padding:4px 2px; border-bottom:2px solid transparent; }
-  nav.tabs a.on { color:var(--cyan); border-bottom-color:var(--cyan); text-shadow:0 0 8px rgba(54,230,224,.6); }
-  .wrap { max-width:1040px; margin:0 auto; padding:6px 18px 90px; }
-  .search { display:flex; gap:8px; margin:14px 0 6px; }
-  .search input { flex:1; padding:13px 15px; font-size:16px; font-family:inherit; background:#070b12; color:var(--ink); border:1px solid var(--line); border-radius:8px; }
-  .search input:focus { outline:none; border-color:var(--cyan); box-shadow:0 0 10px rgba(54,230,224,.25); }
-  .search select { background:#070b12; color:var(--ink); border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13px; padding:0 8px; }
-  .search button { padding:0 24px; font-size:15px; font-family:inherit; cursor:pointer; color:#04121a; background:linear-gradient(135deg,var(--cyan),#2bbfd6); border:none; border-radius:8px; letter-spacing:2px; font-weight:600; }
-  .search button:disabled { opacity:.4; cursor:default; }
-  .hint { color:var(--muted); font-size:11px; }
-  .console { margin:12px 0 8px; min-height:18px; font-size:12px; color:var(--cyan); letter-spacing:.4px; }
-  .console .dim { color:var(--muted); }
-  .experts { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0; }
-  .enode { font-size:11px; padding:4px 10px; border-radius:14px; border:1px solid currentColor; opacity:.45; transition:opacity .25s, box-shadow .25s; }
-  .enode.live { opacity:1; box-shadow:0 0 10px currentColor; }
-  .enode .ct { color:var(--muted); }
-  /* funnel dot grid */
-  .gridwrap { position:relative; border:1px solid var(--line); border-radius:10px; background:#070a10; padding:8px; margin:8px 0; }
-  #grid { display:block; width:100%; }
-  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:10px; color:var(--muted); margin-top:6px; }
-  .legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle; }
-  /* winners */
-  .winners { margin-top:18px; }
-  .wcard { background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin:16px 0; position:relative;
-    box-shadow:0 0 0 1px rgba(54,230,224,.15), 0 0 26px rgba(54,230,224,.07); animation:rise .55s ease both; }
-  @keyframes rise { from{opacity:0; transform:translateY(14px) scale(.97)} to{opacity:1; transform:none} }
-  .wcard .conf { position:absolute; top:14px; right:18px; font-size:12px; color:var(--cyan); }
-  .wcard .meta { font-size:13px; color:var(--muted); margin-bottom:10px; }
-  .wcard .meta b { color:#dbe7f5; font-weight:600; }
-  .wcard .poem { white-space:pre-wrap; font-size:18px; color:#e6eefb; margin:6px 0 14px; }
-  .wcard .poem mark { background:rgba(255,210,77,.22); color:#ffe8a3; padding:0 2px; border-radius:3px; }
-  .poem-wrap { position:relative; }
-  .poem-wrap.clamped .poem { max-height:14.5em; overflow:hidden; margin-bottom:0; }
-  .poem-wrap.clamped::after { content:""; position:absolute; left:0; right:0; bottom:26px; height:50px; background:linear-gradient(transparent,var(--panel2)); pointer-events:none; }
-  .unfold { display:block; width:100%; border:none; background:none; cursor:pointer; color:var(--cyan); font-size:13px; font-family:inherit; padding:6px 0 2px; }
-  .why { font-size:14px; background:rgba(54,230,224,.06); border-left:3px solid var(--cyan); padding:10px 12px; border-radius:0 6px 6px 0; color:#bcd; }
-  .aspects { margin:8px 0 0; }
-  .tag { display:inline-block; font-size:11px; padding:2px 9px; border-radius:11px; margin:3px 5px 0 0; border:1px solid currentColor; }
-  .src { font-size:10px; color:var(--muted); margin-top:10px; }
-  .empty { color:var(--muted); text-align:center; padding:30px; }
-  /* browse */
-  .filters { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:16px 0 4px; }
-  .chip { font-size:13px; padding:3px 12px; border-radius:13px; cursor:pointer; font-family:inherit; background:var(--panel); border:1px solid var(--line); color:var(--muted); }
-  .chip.on { background:var(--cyan); border-color:var(--cyan); color:#04121a; }
-  .filters select { font-size:13px; padding:4px 8px; background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:8px; font-family:inherit; max-width:220px; }
-  .pager { display:flex; justify-content:center; gap:14px; align-items:center; margin:18px 0; font-size:13px; color:var(--muted); }
-  .pager button { background:var(--panel); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:4px 14px; cursor:pointer; font-family:inherit; }
-  .pager button:disabled { opacity:.35; }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{background:var(--bg);color:var(--t1);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono)}
+  a{color:var(--mint);text-decoration:none}
+  ::selection{background:rgba(94,230,196,.28);color:#eafff8}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.09);border-radius:2px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes pf-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pf-spin{to{transform:rotate(360deg)}}
+
+  #app{min-height:100vh;background:radial-gradient(120% 90% at 50% -10%,#0d1420 0%,var(--bg) 60%);display:flex;flex-direction:column}
+
+  /* header */
+  header{display:flex;align-items:center;gap:16px;padding:0 22px;height:52px;border-bottom:1px solid var(--line);background:rgba(9,12,19,.7);backdrop-filter:blur(8px);flex:none}
+  .logo{display:flex;align-items:baseline;gap:9px}
+  .logo .zh{font-family:var(--serif-cjk);font-size:20px;font-weight:500;letter-spacing:2px;color:var(--title)}
+  .logo .en{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--mint)}
+  .hsep{width:1px;height:20px;background:rgba(255,255,255,.1)}
+  .htag{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--t4)}
+  nav.tabs{display:flex;gap:16px;margin-left:6px}
+  nav.tabs a{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--t4);cursor:pointer;padding:2px 0;border-bottom:1px solid transparent}
+  nav.tabs a.on{color:var(--mint);border-bottom-color:var(--mint)}
+  .status{margin-left:auto;display:flex;align-items:center;gap:16px;font-family:var(--mono);font-size:11px}
+  .status .lamp{display:flex;align-items:center;gap:7px}
+  .status .dot{width:7px;height:7px;border-radius:50%}
+  .status .clock{color:var(--t4)}
+
+  /* body grid */
+  .body{flex:1;display:grid;grid-template-columns:232px 1fr 288px;overflow:hidden;min-height:0}
+  .rail{background:rgba(10,13,20,.6);overflow-y:auto}
+  .rail.left{border-right:1px solid var(--line)}
+  .rail.right{border-left:1px solid var(--line);display:flex;flex-direction:column}
+  .center{overflow-y:auto;min-height:0}
+  .railhd{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--t4);padding:14px 16px 10px;border-bottom:1px solid rgba(255,255,255,.06)}
+
+  /* telemetry */
+  .tel{padding:16px;display:flex;flex-direction:column;gap:18px}
+  .tel .k{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--t3)}
+  .tel .row{display:flex;justify-content:space-between;align-items:baseline}
+  .tel .big{font-family:var(--mono);font-size:22px;line-height:1;color:var(--title)}
+  .tel .sub{font-family:var(--mono);font-size:9px;color:var(--t4);margin-top:4px}
+  .bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;margin:6px 0 4px}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--mint),var(--amber));border-radius:2px;transition:width .2s}
+  .langbar{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .langbar .n{font-family:var(--mono);font-size:9.5px;color:var(--t3);width:52px;flex:none}
+  .langbar .t{flex:1;height:3px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden}
+  .langbar .t > i{display:block;height:100%;border-radius:2px}
+  .langbar .v{font-family:var(--mono);font-size:9px;color:var(--t4);width:34px;text-align:right}
+  .stopbox{border-top:1px solid rgba(255,255,255,.06);padding-top:14px}
+  .stopbox .h{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--amber);margin-bottom:6px}
+  .stopbox .b{font-family:var(--mono);font-size:10.5px;line-height:1.6;color:var(--t3)}
+
+  /* idle hero */
+  .hero{max-width:720px;margin:0 auto;width:100%;padding:6vh 24px 40px;animation:pf-rise .5s ease}
+  .hero .lead{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--mint);margin-bottom:22px}
+  .hero h1{font-family:var(--serif-cjk);font-weight:500;font-size:34px;line-height:1.4;letter-spacing:.5px;color:var(--title);margin:0 0 8px}
+  .hero p.desc{color:var(--t3);font-size:14px;line-height:1.7;margin:0 0 30px;max-width:560px}
+  .hero p.desc b{color:var(--title);font-weight:500}
+  .inwrap{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.03);border:1px solid rgba(94,230,196,.3);border-radius:10px;padding:12px 16px;box-shadow:0 0 40px rgba(94,230,196,.06)}
+  .inwrap .caret{font-family:var(--mono);color:var(--mint);font-size:15px;flex:none}
+  .inwrap input{flex:1;background:transparent;border:none;outline:none;color:var(--title);font-family:var(--serif-cjk);font-size:17px;letter-spacing:.3px}
+  .inwrap input::placeholder{color:var(--t4)}
+  .btn-go{flex:none;background:var(--mint);color:#06110d;border:none;border-radius:6px;padding:9px 18px;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.05em;cursor:pointer}
+  .btn-go:disabled{opacity:.5;cursor:default}
+  .sugg{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;align-items:center}
+  .sugg .lbl{font-family:var(--mono);font-size:10px;color:var(--t4)}
+  .chip-s{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:6px 14px;color:#a7b0c0;font-family:var(--serif-cjk);font-size:13px;cursor:pointer}
+  .chip-s:hover{border-color:rgba(94,230,196,.5);color:var(--title)}
+  .modes-hd{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--t4);margin:34px 0 12px}
+  .modes{display:flex;flex-wrap:wrap;gap:10px}
+  .mcard{text-align:left;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 14px;cursor:pointer;min-width:150px}
+  .mcard.on{background:rgba(94,230,196,.07);border-color:rgba(94,230,196,.4)}
+  .mcard .nm{font-family:var(--sans);font-size:13px;font-weight:600;color:#c7cedb}
+  .mcard.on .nm{color:var(--mint)}
+  .mcard .ds{font-family:var(--mono);font-size:9.5px;color:var(--t4);margin-top:3px}
+  .langsel-wrap{margin-top:18px;display:flex;align-items:center;gap:10px}
+  .langsel-wrap .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--t4)}
+  select.langsel{background:rgba(255,255,255,.03);color:var(--t2);border:1px solid rgba(255,255,255,.1);border-radius:6px;font-family:var(--mono);font-size:11px;padding:6px 8px}
+
+  /* running stage */
+  .stage{padding:20px 26px 60px;max-width:900px;margin:0 auto;width:100%}
+  .qecho{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .qecho .k{font-family:var(--mono);font-size:11px;color:var(--mint)}
+  .qecho .q{font-family:var(--serif-cjk);font-size:17px;color:var(--title)}
+  .btn-reset{margin-left:auto;background:transparent;border:1px solid rgba(255,255,255,.12);color:var(--t3);border-radius:5px;padding:5px 12px;font-family:var(--mono);font-size:10.5px;cursor:pointer}
+  .btn-reset:hover{color:var(--title);border-color:rgba(255,255,255,.3)}
+  .pipe{display:flex;margin-bottom:18px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .pstep{flex:1;display:flex;flex-direction:column;gap:3px;padding:10px 14px;border-right:1px solid var(--line);border-bottom:2px solid transparent}
+  .pstep:last-child{border-right:none}
+  .pstep.on{background:rgba(94,230,196,.07);border-bottom-color:var(--mint)}
+  .pstep .num{font-family:var(--mono);font-size:9px;color:var(--t4)}
+  .pstep.on .num{color:var(--mint)}
+  .pstep .lbl{font-family:var(--sans);font-size:12px;font-weight:500;color:var(--t4)}
+  .pstep.done .lbl{color:var(--t3)} .pstep.on .lbl{color:var(--title)}
+  .pstep .sub{font-family:var(--mono);font-size:9px;color:var(--t4)}
+  .canvaswrap{position:relative;margin-bottom:14px}
+  #dots{display:block;width:100%;height:210px;border:1px solid var(--line);border-radius:8px;background:var(--canvas)}
+  .canvaslabel{position:absolute;top:10px;left:12px;font-family:var(--mono);font-size:9px;letter-spacing:.09em;color:var(--t4);pointer-events:none}
+  .canvasscan{position:absolute;bottom:10px;right:12px;font-family:var(--mono);font-size:9px;color:var(--mint);pointer-events:none}
+  .tip{position:absolute;transform:translate(-50%,-160%);background:rgba(8,11,17,.94);border-radius:5px;padding:5px 10px;font-family:var(--mono);font-size:10.5px;white-space:nowrap;pointer-events:none;z-index:6;backdrop-filter:blur(3px)}
+  .intent{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:22px;animation:pf-rise .4s ease}
+  .intent .k{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--t4)}
+  .ichip{display:inline-flex;align-items:center;gap:6px;background:rgba(94,230,196,.08);border:1px solid rgba(94,230,196,.22);border-radius:5px;padding:4px 10px;font-size:12px}
+  .ichip .head{font-family:var(--serif-cjk)}
+  .ichip .exp{font-family:var(--mono);font-size:9.5px;color:var(--t3)}
+  .reshd{display:flex;align-items:baseline;gap:10px;margin-bottom:16px;border-top:1px solid rgba(255,255,255,.06);padding-top:20px}
+  .reshd .k{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--amber)}
+  .reshd .c{font-family:var(--mono);font-size:11px;color:var(--t4)}
+  .cards{display:flex;flex-direction:column;gap:16px}
+  .empty{color:var(--t3);text-align:center;padding:30px;font-family:var(--mono);font-size:12px}
+  .endnote{text-align:center;padding:30px 0 10px;font-family:var(--mono);font-size:10.5px;color:var(--t4);animation:pf-rise .6s ease}
+
+  /* poem card */
+  .card{border:1px solid rgba(255,255,255,.09);border-radius:10px;background:linear-gradient(180deg,rgba(20,26,35,.9),rgba(14,18,26,.9));overflow:hidden;animation:pf-rise .5s ease}
+  .card .hd{display:flex;align-items:flex-start;gap:14px;padding:16px 18px 12px}
+  .card .rank{font-family:var(--mono);font-size:11px;color:var(--mint);flex:none;padding-top:3px}
+  .card .ti{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .card .ti h3{font-family:var(--serif-cjk);font-weight:500;font-size:19px;color:var(--title);margin:0}
+  .card .ti .au{font-family:var(--sans);font-size:12px;color:#a7b0c0}
+  .card .ti .me{font-family:var(--mono);font-size:10px;color:var(--t4)}
+  .card .sc{flex:none;text-align:right}
+  .card .sc .p{font-family:var(--mono);font-size:14px;color:var(--amber)}
+  .card .sc .l{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--t4)}
+  .poembody{padding:6px 18px 12px}
+  .poembody.scroll{max-height:340px;overflow-y:auto;-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 22px,#000 calc(100% - 22px),transparent 100%);mask-image:linear-gradient(180deg,transparent 0,#000 22px,#000 calc(100% - 22px),transparent 100%)}
+  .pl{color:var(--poem);margin:0 -8px;padding:1px 8px;border-left:2px solid transparent;border-radius:3px;transition:background .3s}
+  .pl.cjk{font-family:var(--serif-cjk);font-size:17px;line-height:1.9;letter-spacing:.04em}
+  .pl.la{font-family:var(--serif-la);font-size:15px;line-height:1.75}
+  .pl.hit{color:var(--amber-t);background:linear-gradient(90deg,rgba(232,177,94,.14),rgba(232,177,94,.02));border-left-color:var(--amber)}
+  .foldbtn{background:transparent;border:none;color:var(--mint);font-family:var(--mono);font-size:10.5px;cursor:pointer;padding:2px 18px 10px}
+  .why{margin:2px 18px 0;padding:11px 13px;background:rgba(94,230,196,.05);border-left:2px solid rgba(94,230,196,.4);border-radius:0 5px 5px 0}
+  .why .k{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--mint)}
+  .why .b{font-family:var(--sans);font-size:12.5px;line-height:1.6;color:var(--t2)}
+  .cfoot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 18px 15px}
+  .ptag{font-size:11px;color:var(--t3);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:4px;padding:2px 8px}
+  .ptag.cjk{font-family:var(--serif-cjk)} .ptag.la{font-family:var(--serif-la)}
+  .csrc{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--t4);display:flex;align-items:center;gap:6px}
+  .csrc:hover{color:var(--mint)} .csrc .d{width:6px;height:6px;border-radius:50%;background:var(--mint)}
+
+  /* agent swarm */
+  .swarmhd{padding:14px 16px 10px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .swarmhd .r{display:flex;align-items:center;justify-content:space-between}
+  .swarmhd .t{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--t4)}
+  .swarmhd .st{font-family:var(--mono);font-size:9.5px;color:var(--t4)}
+  .swarmhd .note{font-family:var(--mono);font-size:9px;line-height:1.5;color:var(--t5);margin-top:6px}
+  .swarmlist{flex:1;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+  .arow{display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:4px}
+  .arow .ad{width:6px;height:6px;border-radius:50%;flex:none}
+  .arow .aid{font-family:var(--mono);font-size:9px;color:var(--t4);width:26px;flex:none}
+  .arow .af{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+  .arow .af.cjk{font-family:var(--serif-cjk)} .arow .af.la{font-family:var(--mono)}
+  .arow .an{font-family:var(--mono);font-size:8.5px;color:var(--t4);flex:none;width:38px;text-align:right}
+  .arow .ac{font-family:var(--mono);font-size:10px;color:var(--amber);flex:none;width:10px}
+
+  /* browse + thanks (kept, restyled) */
+  .page{max-width:900px;margin:0 auto;width:100%;padding:24px 26px 60px}
+  .filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px}
+  .chip{font-size:13px;padding:3px 12px;border-radius:13px;cursor:pointer;font-family:var(--sans);background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);color:var(--t3)}
+  .chip.on{background:var(--mint);border-color:var(--mint);color:#06110d}
+  .filters select{font-size:13px;padding:4px 8px;background:rgba(255,255,255,.03);color:var(--t2);border:1px solid rgba(255,255,255,.1);border-radius:8px;font-family:var(--sans);max-width:220px}
+  .pager{display:flex;justify-content:center;gap:14px;align-items:center;margin:18px 0;font-family:var(--mono);font-size:12px;color:var(--t4)}
+  .pager button{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);color:var(--t2);border-radius:8px;padding:4px 14px;cursor:pointer;font-family:var(--mono)}
+  .pager button:disabled{opacity:.35}
+  .hint{font-family:var(--mono);color:var(--t4);font-size:11px}
+
+  @media(max-width:940px){
+    .body{display:block;overflow:visible}
+    .rail{display:none}
+    .body.running .rail{display:block}
+    .body.running .rail.right{display:flex;max-height:320px}
+    .htag,nav.tabs{display:none}
+    .hero h1{font-size:27px}
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>诗 渡</h1>
-  <p class="mono">CROSS-LINGUAL POETRY SWARM · 任意语言描述，漏斗逐层点亮全库诗海 · 仅原文不译</p>
-  <nav class="tabs"><a id="tab-search" class="on">寻 诗</a><a id="tab-browse">览 诗</a><a id="tab-thanks">致 谢</a></nav>
-</header>
-
-<div class="wrap" id="view-search">
-  <div class="search">
-    <input id="q" placeholder="例如：有关河流与天地广阔 / 哭了之后喝酒 / 我记得一句『在天愿作比翼鸟』" />
-    <select id="mode" title="检索方式">
-      <option value="hybrid">混合(全通道)</option>
-      <option value="image">语义(gist+意象)</option>
-      <option value="keyword">关键词(字面)</option>
-      <option value="concept">概念扩展(跨语言)</option>
-      <option value="scan">深扫(读到满意即停)</option>
-      <option value="exact">严格全文(词对词)</option>
-    </select>
-    <select id="lang" title="限定语言"><option value="">全部语言</option></select>
-    <button id="go">寻 诗</button>
-  </div>
-  <div class="hint mono" id="hint">corpus loading…</div>
-  <div class="console mono" id="console"></div>
-  <div class="experts" id="experts"></div>
-  <div class="gridwrap"><canvas id="grid"></canvas>
-    <div class="legend">
-      <span><i style="background:#222e3e"></i>全库</span>
-      <span><i style="background:var(--cyan)"></i>向量召回</span>
-      <span><i style="background:#bff"></i>入围精读</span>
-      <span><i style="background:var(--k-emotion)"></i>情感</span>
-      <span><i style="background:var(--k-action)"></i>动作</span>
-      <span><i style="background:var(--k-imagery)"></i>意象</span>
-      <span><i style="background:var(--gold)"></i>命中</span>
+<div id="app">
+  <header>
+    <div class="logo"><span class="zh">诗渡</span><span class="en">POEMFERRY</span></div>
+    <div class="hsep"></div>
+    <span class="htag">跨语言 · 公共领域 · 语义检索主机</span>
+    <nav class="tabs"><a id="tab-search" class="on">寻诗</a><a id="tab-browse">览诗</a><a id="tab-thanks">致谢</a></nav>
+    <div class="status">
+      <span class="lamp"><span class="dot" id="lamp"></span><span id="statusText"></span></span>
+      <span class="clock" id="clock">00.00s</span>
     </div>
+  </header>
+
+  <div class="body" id="body">
+    <!-- LEFT · telemetry -->
+    <aside class="rail left" id="railLeft">
+      <div class="railhd">TELEMETRY / 遥测</div>
+      <div class="tel">
+        <div>
+          <div class="row"><span class="k">全库</span><span class="k" id="telCorpus" style="color:var(--title)">—</span></div>
+          <div class="sub" id="telCorpusSub">首诗</div>
+        </div>
+        <div>
+          <div class="row"><span class="k" id="telReadK">已通读</span><span class="mono" id="telRead" style="font-size:15px;color:var(--mint)">0</span></div>
+          <div class="bar"><i id="telBar" style="width:0%"></i></div>
+          <div class="sub" id="telReadSub">/ — 待读候选</div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1"><div class="big" id="telCand">0</div><div class="sub" id="telCandK">候选打捞</div></div>
+          <div style="flex:1"><div class="big" id="telHits" style="color:var(--amber)">0</div><div class="sub" id="telHitsK">强命中</div></div>
+        </div>
+        <div>
+          <div class="k" style="letter-spacing:.14em;margin-bottom:9px">语种分布</div>
+          <div id="telLangs"></div>
+        </div>
+        <div class="stopbox" id="stopbox" style="display:none">
+          <div class="h">停止条件</div><div class="b" id="stopText"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CENTER · stage -->
+    <main class="center" id="center">
+      <!-- idle -->
+      <div id="idle">
+        <div class="hero">
+          <div class="lead">让机器一目十行，替你把整座图书馆读一遍。</div>
+          <h1>你记得一首诗的碎片，<br>却找不到它。</h1>
+          <p class="desc">用任何语言，用最模糊的方式描述它 —— 一个画面、一种情绪、半句残句。数十位 agent 会在<span id="heroCount">全库</span>诗里替你逐首审读，只把命中的<b>原文</b>端到你面前。</p>
+          <div class="inwrap">
+            <span class="caret">›</span>
+            <input id="q" placeholder="描述那首你记不清的诗……" autocomplete="off" />
+            <button class="btn-go" id="go">检索 ⏎</button>
+          </div>
+          <div class="sugg">
+            <span class="lbl">试试 →</span>
+            <span class="chip-s" data-q="深秋黄昏的乡愁">深秋黄昏的乡愁</span>
+            <span class="chip-s" data-q="哭了之后喝酒">哭了之后喝酒</span>
+            <span class="chip-s" data-q="天冷的时候和小猫猫不出门">天冷的时候和小猫猫不出门</span>
+            <span class="chip-s" data-q="在天愿作比翼鸟">在天愿作比翼鸟</span>
+            <span class="chip-s" data-q="a candle burning in an empty room">a candle burning in an empty room</span>
+          </div>
+          <div class="modes-hd">检索人格 / RETRIEVAL MODE</div>
+          <div class="modes" id="modes"></div>
+          <div class="langsel-wrap">
+            <span class="lbl">限定语言 / LANG</span>
+            <select class="langsel" id="lang"><option value="">全部语言</option></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- running / done -->
+      <div id="running" style="display:none">
+        <div class="stage">
+          <div class="qecho">
+            <span class="k">QUERY</span><span class="q" id="qEcho"></span>
+            <button class="btn-reset" id="reset">↺ 新检索</button>
+          </div>
+          <div class="pipe" id="pipe"></div>
+          <div class="canvaswrap">
+            <canvas id="dots"></canvas>
+            <div class="canvaslabel" id="canvasLabel"></div>
+            <div class="canvasscan" id="canvasScan"></div>
+            <div class="tip" id="tip" style="display:none"></div>
+          </div>
+          <div class="intent" id="intent" style="display:none"></div>
+          <div class="reshd" id="reshd" style="display:none"><span class="k">命中原典</span><span class="c" id="resCount"></span></div>
+          <div class="cards" id="cards"></div>
+          <div class="endnote" id="endnote" style="display:none">— 通读完毕 · 诗永不翻译，以上皆为原文原排 —</div>
+        </div>
+      </div>
+
+      <!-- browse -->
+      <div id="view-browse" style="display:none">
+        <div class="page">
+          <div class="filters" id="langChips"></div>
+          <div class="filters"><select id="authorSel"><option value="">全部作者</option></select><span class="hint" id="browseTotal"></span></div>
+          <div class="cards" id="browseList"></div>
+          <div class="pager"><button id="prev">上一页</button><span id="pageInfo"></span><button id="next">下一页</button></div>
+        </div>
+      </div>
+      <!-- thanks -->
+      <div id="view-thanks" style="display:none">
+        <div class="page">
+          <p class="hint" style="margin:0 0 14px">本站诗词全部来自以下公共领域 / 开放许可的语料源，谨此致谢。点击可访问出处。</p>
+          <div class="cards" id="thanksList"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT · agent swarm -->
+    <aside class="rail right" id="railRight">
+      <div class="swarmhd">
+        <div class="r"><span class="t">AGENT SWARM</span><span class="st" id="swarmStatus">待命</span></div>
+        <div class="note">每个 agent 并行掠读不同的诗 · 右列为已读数 · ✓ 为标记命中</div>
+      </div>
+      <div class="swarmlist" id="swarmList"></div>
+    </aside>
   </div>
-  <div class="winners" id="winners"></div>
-</div>
-
-<div class="wrap" id="view-thanks" style="display:none">
-  <p class="hint mono" style="margin:14px 0">本站诗词全部来自以下公共领域 / 开放许可的语料源，谨此致谢。点击可访问出处。</p>
-  <div id="thanksList"></div>
-</div>
-
-<div class="wrap" id="view-browse" style="display:none">
-  <div class="filters" id="langChips"></div>
-  <div class="filters"><select id="authorSel"><option value="">全部作者</option></select><span class="hint mono" id="browseTotal"></span></div>
-  <div id="browseList"></div>
-  <div class="pager"><button id="prev">上一页</button><span id="pageInfo" class="mono"></span><button id="next">下一页</button></div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const fmt = n => Math.round(n||0).toLocaleString("en-US");
 const LANG = {zh:"中文",en:"English",ja:"日本語",fr:"Français",de:"Deutsch",es:"Español",it:"Italiano"};
-const KIND_COLOR = {emotion:"#ff4d6d",action:"#4da6ff",imagery:"#ffd24d",setting:"#4dffa6",sequence:"#b96dff"};
-const KIND_CN = {emotion:"情感",action:"动作",imagery:"意象",setting:"场景",sequence:"时序"};
-const slug = s => "a"+(s||"").replace(/[^a-z0-9]+/gi,"_").toLowerCase();
+const isCJK = s => /[一-鿿぀-ヿ가-힯]/.test(s||"");
+const cjkLang = c => c==="zh"||c==="ja";
 
-/* ── funnel dot grid ── */
-class Grid {
-  constructor(c){ this.c=c; this.ctx=c.getContext("2d"); this.ids=[]; this.idx={}; this.anim=false;
-    addEventListener("resize",()=>{ this.layout(); this.draw(); }); }
-  setCorpus(ids){ this.ids=ids; this.idx={}; ids.forEach((id,i)=>this.idx[id]=i);
-    this.level=new Uint8Array(ids.length); this.kc=new Array(ids.length).fill(null);
-    this.layout(); this.draw(); }
-  layout(){ const w=this.c.clientWidth||960; this.cell=6; this.cols=Math.max(20,Math.floor(w/this.cell));
-    this.rows=Math.ceil(this.ids.length/this.cols);
-    this.c.width=this.cols*this.cell; this.c.height=this.rows*this.cell; }
-  reset(){ if(this.level){ this.level.fill(0); this.kc.fill(null); } }
-  setLevel(ids, lv){ ids.forEach(id=>{ const i=this.idx[id]; if(i!=null && this.level[i]<lv) this.level[i]=lv; }); }
-  onlyLevel(ids, lv){ const keep=new Set(ids.map(id=>this.idx[id])); for(let i=0;i<this.level.length;i++){ if(this.level[i]===lv-1 && !keep.has(i)) this.level[i]=1; } this.setLevel(ids,lv); }
-  flare(id, kind){ const i=this.idx[id]; if(i!=null){ this.kc[i]=KIND_COLOR[kind]||"#fff"; if(this.level[i]<2) this.level[i]=2; } }
-  winners(ids){ ids.forEach(id=>{ const i=this.idx[id]; if(i!=null) this.level[i]=4; }); }
-  start(){ if(this.anim) return; this.anim=true; this.loop(); }
-  stop(){ this.anim=false; this.draw(); }
-  loop(){ if(!this.anim) return; this.draw(performance.now()); requestAnimationFrame(()=>this.loop()); }
-  draw(t){ const {ctx,cell}=this; if(!this.ids.length) return;
-    ctx.clearRect(0,0,this.c.width,this.c.height);
-    const pulse=0.6+0.4*Math.sin((t||0)/350);
-    for(let i=0;i<this.ids.length;i++){
-      const col=i%this.cols, row=(i/this.cols)|0, x=col*cell, y=row*cell, lv=this.level[i];
-      let color="#1a2331", size=cell-2;
-      if(lv===1){ color="rgba(54,230,224,0.85)"; }
-      else if(lv===2){ color=this.kc[i]||("rgba(180,255,250,"+(0.7+0.3*pulse)+")"); size=cell-1; }
-      else if(lv===4){ color="#ffd24d"; size=cell;
-        ctx.shadowColor="#ffd24d"; ctx.shadowBlur=6; }
-      ctx.fillStyle=color; ctx.fillRect(x, y, size, size); ctx.shadowBlur=0;
-    } }
-}
-const grid = new Grid($("grid"));
+// retrieval modes → real backend modes; family drives the honest per-mode UI
+const MODES = [
+  {key:"hybrid",  name:"混合",     desc:"语义 + 字面，默认",        family:"swarm"},
+  {key:"image",   name:"语义",     desc:"按意象主旨跨语言匹配",     family:"swarm"},
+  {key:"keyword", name:"关键词",   desc:"字面精确，同语言细节",     family:"swarm"},
+  {key:"concept", name:"概念",     desc:"跨语言近义桥接 河→río→川", family:"swarm"},
+  {key:"scan",    name:"深扫",     desc:"逐首读全文，读到满意即停", family:"scan"},
+  {key:"exact",   name:"严格全文", desc:"词对词连续精确，零 AI",    family:"exact"},
+];
+const modeFamily = k => (MODES.find(m=>m.key===k)||{}).family || "swarm";
 
-/* ── poem clamp ── */
-const CLAMP_LINES=12;
-function poemBlock(text, ev){ let h=esc(text);
-  (ev||[]).forEach(l=>{ const t=(l||"").trim(); if(t.length<2) return;
-    h=h.replace(new RegExp(esc(t).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"g"),"<mark>$&</mark>"); });
-  if((text.match(/\n/g)||[]).length+1<=CLAMP_LINES) return `<div class="poem">${h}</div>`;
-  return `<div class="poem-wrap clamped"><div class="poem">${h}</div><button class="unfold">展开全文 ▾</button></div>`; }
-document.addEventListener("click",e=>{ if(!e.target.classList.contains("unfold")) return;
-  const w=e.target.closest(".poem-wrap"); const c=w.classList.toggle("clamped"); e.target.textContent=c?"展开全文 ▾":"收起 ▴"; });
+// ── app state ──
+const S = {
+  view:"search", phase:"idle", mode:"hybrid", lang:"", family:"swarm",
+  query:"", corpus:0, langCounts:[],
+  cand:0, read:0, readTotal:0, hits:0, revealed:0, stopReason:"",
+  cards:[], cardIds:new Set(), fragPool:[], es:null, startTs:0,
+};
 
-/* ── boot ── */
+/* ═══ boot ═══ */
+$("modes").innerHTML = MODES.map(m=>
+  `<button class="mcard${m.key===S.mode?" on":""}" data-mode="${m.key}"><div class="nm">${m.name}</div><div class="ds">${esc(m.desc)}</div></button>`).join("");
+$("modes").querySelectorAll(".mcard").forEach(b=>b.onclick=()=>{
+  S.mode=b.dataset.mode; $("modes").querySelectorAll(".mcard").forEach(x=>x.classList.toggle("on",x===b));
+});
+document.querySelectorAll(".chip-s").forEach(c=>c.onclick=()=>{ $("q").value=c.dataset.q; $("q").focus(); });
+
 fetch("/api/info").then(r=>r.json()).then(d=>{
-  $("hint").textContent=`corpus ${d.poem_count} · ${d.languages.join("/")} · doc ${d.doc_indexed} · line ${d.line_vectors} · model ${d.model}`;
-  if(d.retrieval) $("mode").value=d.retrieval;
+  S.corpus = d.poem_count;
+  $("telCorpus").textContent = fmt(d.poem_count);
+  $("telCorpusSub").textContent = `首诗 · ${d.languages.length} 种语言`;
+  $("heroCount").textContent = `${fmt(d.poem_count)} 首`;
+  if(d.retrieval && MODES.some(m=>m.key===d.retrieval)){ S.mode=d.retrieval;
+    $("modes").querySelectorAll(".mcard").forEach(x=>x.classList.toggle("on",x.dataset.mode===d.retrieval)); }
   d.languages.forEach(l=>{const o=document.createElement("option");o.value=l;o.textContent=LANG[l]||l;$("lang").appendChild(o);});
 });
-fetch("/api/corpus").then(r=>r.json()).then(d=>grid.setCorpus(d.ids)).catch(()=>{});
-
-/* ── search ── */
-let es=null;
-const state={winners:[]};
-const setC=h=>$("console").innerHTML=h;
-
-function startSearch(){
-  const q=$("q").value.trim(); if(!q) return;
-  if(es) es.close();
-  state.winners=[]; $("winners").innerHTML=""; $("experts").innerHTML="";
-  grid.reset(); grid.start(); $("go").disabled=true;
-  setC('<span class="dim">理解描述 · 向量打捞全库…</span>');
-  const mode=$("mode").value;
-  const lang=$("lang").value;
-  es=new EventSource(`/api/search?retrieval=${mode}${lang?`&lang=${lang}`:""}&q=`+encodeURIComponent(q));
-  es.onmessage=ev=>{
-    const m=JSON.parse(ev.data);
-    switch(m.type){
-      case "understanding": setC(`<span class="dim">意图</span> ${esc((m.intent||{}).intent_summary||"")}`); break;
-      case "criteria":
-        $("experts").innerHTML=m.criteria.map(c=>{ const col=KIND_COLOR[c.kind]||"var(--cyan)";
-          return `<span class="enode" style="color:${col}">${esc(KIND_CN[c.kind]||c.kind)} · ${esc(c.aspect)} <span class="ct" id="ct-${slug(c.aspect)}"></span></span>`; }).join("");
-        break;
-      case "retrieved":
-        grid.setLevel(m.ids||[],1);
-        setC(`<span class="dim">[${esc(m.mode)}] 向量召回</span> ${m.count} 首 → 锁定`);
-        break;
-      case "fragment_hits": setC(`<span class="dim">原句精确命中</span> ${m.count} 首 → 直通精读`); break;
-      case "exact_hits": grid.setLevel(m.ids||[],1); setC(`<span class="dim">严格全文 · 词对词命中</span> ${m.count} 首${m.count>m.shown?`（显示前 ${m.shown}）`:""}`); break;
-      case "scan_order": setC(`<span class="dim">深扫 · 按检索顺序排定阅读</span> ${m.total} 首待读…`); break;
-      case "scan_wave": setC(`<span class="dim">深扫精读中</span> 已读 <b>${m.read}</b>/${m.total} 首 · 强命中 ${m.strong}`); break;
-      case "scan_hit": grid.flare(m.poem_id,"imagery"); break;
-      case "shortlist":
-        grid.onlyLevel((m.cards||[]).map(c=>c.id),2);
-        document.querySelectorAll(".enode").forEach(n=>n.classList.add("live"));
-        setC(`<span class="dim">入围精读</span> ${m.count} 首 · 蜂群专家审读中…`);
-        break;
-      case "expert_hit": {
-        grid.flare(m.poem_id,m.kind);
-        const ct=$("ct-"+slug(m.aspect)); if(ct) ct.textContent="+"+((+ct.textContent.replace("+","")||0)+1);
-        break; }
-      case "verdict": state.winners.push({verdict:m.verdict,poem:m.poem}); break;
-      case "done":
-        grid.winners(state.winners.map(w=>w.poem.id)); grid.draw();
-        setTimeout(()=>grid.stop(),1200);
-        state.winners.sort((a,b)=>(b.verdict.confidence||0)-(a.verdict.confidence||0));
-        $("winners").innerHTML=state.winners.length?state.winners.map(w=>appreciation(w.verdict,w.poem)).join(""):'<div class="empty">蜂群未捞到符合的诗，换个描述或检索方式再试。</div>';
-        const u=m.usage||{}; const tok=u.prompt?((u.prompt+(u.completion||0))/1000).toFixed(1)+"k tok":"";
-        const REASON={satisfied:"已读到满意即停",budget:"达阅读上限",diminishing:"收益递减停止",exhausted:"已读完候选",empty:"无候选"};
-        const readinfo=(m.read!=null&&m.total)?` · 读了 ${m.read}/${m.total} 首`:"";
-        const reason=m.reason?` · ${REASON[m.reason]||m.reason}`:"";
-        setC(`<span class="dim">提取完成</span> · 命中 <b>${m.matched}</b> 首${readinfo}${reason} · ${tok}`);
-        es.close(); $("go").disabled=false; break;
-      case "error": setC(`<span style="color:var(--magenta)">[${m.stage||"err"}] ${esc(m.message||"")}</span>`); break;
-    }
-  };
-  es.onerror=()=>{ es.close(); $("go").disabled=false; grid.stop(); };
+// language distribution for the telemetry bars, from the per-poem language list
+fetch("/api/corpus").then(r=>r.json()).then(d=>{
+  const counts={}; (d.langs||[]).forEach(l=>counts[l]=(counts[l]||0)+1);
+  S.langCounts = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  renderLangs();
+}).catch(()=>{});
+function renderLangs(){
+  const max = S.langCounts.reduce((m,[,n])=>Math.max(m,n),1);
+  $("telLangs").innerHTML = S.langCounts.map(([c,n])=>{
+    const w=(n/max*100).toFixed(1), col=c==="zh"?"var(--mint)":"rgba(94,230,196,.4)";
+    const v = n>=1000?(n/1000).toFixed(0)+"k":n;
+    return `<div class="langbar"><span class="n">${LANG[c]||c}</span><span class="t"><i style="width:${w}%;background:${col}"></i></span><span class="v">${v}</span></div>`;
+  }).join("");
 }
-function appreciation(v,p){
-  const aspects=(v.matched_description_aspects||[]).map(a=>`<span class="tag" style="color:var(--cyan)">${esc(a)}</span>`).join("");
-  const src=p.source_url?`<a href="${esc(p.source_url)}" target="_blank" rel="noopener">${esc(p.source_name)}</a>`:esc(p.source_name);
-  return `<div class="wcard"><span class="conf mono">匹配 ${Math.round((v.confidence||0)*100)}%</span>
-    <div class="meta"><b>${esc(p.title||"无题")}</b> · ${esc(p.author||"佚名")} · ${esc(p.era||"")} · ${esc(LANG[p.language]||p.language)}</div>
-    ${poemBlock(p.full_text,v.evidence_lines)}<div class="why">${esc(v.explanation)}</div>
-    <div class="aspects">${aspects}</div><div class="src mono">src ${src} · license ${esc(p.license)}</div></div>`;
+
+/* ═══ dot field canvas (performative scale viz; ignition tied to real progress) ═══ */
+const Dots = {
+  el:null, ctx:null, dots:[], cw:0, ch:210, raf:null, hover:null, litTarget:0, litNow:0,
+  init(){
+    const c=$("dots"); this.el=c; const dpr=Math.min(2,devicePixelRatio||1);
+    const w=c.clientWidth||800; c.width=w*dpr; c.height=this.ch*dpr;
+    this.ctx=c.getContext("2d"); this.ctx.setTransform(dpr,0,0,dpr,0,0); this.cw=w;
+    const N=Math.min(2400,Math.floor(w*5)); const arr=[];
+    for(let i=0;i<N;i++) arr.push({x:Math.random()*w,y:Math.random()*this.ch,cand:Math.random()<0.13,
+      hit:false,poemIdx:-1,tw:Math.random()*6.283,igniteAt:Math.random(),flash:0,lit:false,rd:0,frag:-1});
+    // reserve up to ~40 candidate dots as potential result "hit" points
+    const cands=arr.filter(d=>d.cand);
+    for(let i=cands.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[cands[i],cands[j]]=[cands[j],cands[i]];}
+    for(let i=0;i<Math.min(40,cands.length);i++){cands[i].hit=true;cands[i].poemIdx=i;}
+    this.dots=arr; this.hover=null; this.litNow=0; this.litTarget=0;
+    c.onmousemove=e=>this.move(e); c.onmouseleave=()=>this.leave(); c.onclick=()=>this.click();
+  },
+  reset(){ this.litTarget=0; this.litNow=0; this.dots.forEach(d=>{d.lit=false;d.flash=0;d.rd=0;}); },
+  start(){ if(this.raf)return; const loop=()=>{this.draw();this.raf=requestAnimationFrame(loop);}; this.raf=requestAnimationFrame(loop); },
+  stop(){ if(this.raf)cancelAnimationFrame(this.raf); this.raf=null; },
+  draw(){
+    const ctx=this.ctx; if(!ctx)return; const w=this.cw,h=this.ch,t=performance.now();
+    ctx.clearRect(0,0,w,h);
+    // ease lit coverage toward target (target = real read fraction for scan, retrieval burst for swarm)
+    this.litNow += (this.litTarget-this.litNow)*0.08;
+    const done = S.phase==="done";
+    for(const d of this.dots){
+      d.tw+=0.02;
+      if(d.cand && (d.igniteAt<=this.litNow || done)){ if(!d.lit){d.lit=true;d.flash=1;} }
+      if(d.flash>0) d.flash=Math.max(0,d.flash-0.045);
+      const hitActive = d.hit && d.poemIdx>-1 && d.poemIdx<S.revealed;
+      let col,r;
+      if(hitActive){
+        const pulse=0.62+0.38*Math.sin(t/300+d.poemIdx);
+        col=`rgba(232,177,94,${pulse.toFixed(2)})`; r=2.4;
+        ctx.strokeStyle=`rgba(232,177,94,${(0.32+0.22*Math.sin(t/380+d.poemIdx)).toFixed(2)})`;
+        ctx.lineWidth=1; ctx.beginPath(); ctx.arc(d.x,d.y,5.5+1.5*Math.sin(t/430+d.poemIdx),0,6.283); ctx.stroke();
+      } else if(d.lit){
+        const b=(0.5+0.32*d.flash)+0.06*Math.sin(d.tw);
+        col=`rgba(94,230,196,${b.toFixed(2)})`; r=1.4+1.1*d.flash;
+      } else if(d.cand && S.phase!=="idle"){ col="rgba(94,230,196,0.30)"; r=1.15; }
+      else { const tw=0.09+0.05*(0.5+0.5*Math.sin(d.tw)); col=`rgba(140,152,175,${tw.toFixed(2)})`; r=0.9; }
+      ctx.fillStyle=col; ctx.beginPath(); ctx.arc(d.x,d.y,r,0,6.283); ctx.fill();
+      if(this.hover===d){ ctx.strokeStyle="rgba(255,255,255,.75)"; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.arc(d.x,d.y,r+3.5,0,6.283); ctx.stroke(); }
+    }
+  },
+  move(e){
+    const c=this.el,rect=c.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let best=null,bd=1e9;
+    for(const d of this.dots){ const inter=(d.hit&&d.poemIdx>-1&&d.poemIdx<S.revealed)||d.lit; if(!inter)continue;
+      const dx=d.x-mx,dy=d.y-my,q=dx*dx+dy*dy; if(q<bd){bd=q;best=d;} }
+    if(best&&bd<=121){ this.hover=best; const isHit=best.hit&&best.poemIdx>-1&&best.poemIdx<S.revealed;
+      c.style.cursor=isHit?"pointer":"crosshair"; const tip=$("tip");
+      let text;
+      if(isHit){ const card=S.cards[best.poemIdx]; text = card?`◈ ${card.poem.title||"无题"} · ${LANG[card.poem.language]||card.poem.language} — 点击查看`:"◈ 命中"; }
+      else { if(best.frag<0&&S.fragPool.length) best.frag=Math.random()*S.fragPool.length|0;
+             text = best.frag>-1 ? `已通读 · 「${S.fragPool[best.frag]}」` : "已通读"; }
+      tip.textContent=text; tip.style.display=""; tip.style.left=best.x+"px"; tip.style.top=best.y+"px";
+      tip.style.borderColor=isHit?"rgba(232,177,94,.5)":"rgba(94,230,196,.35)"; tip.style.color=isHit?"var(--amber-t)":"var(--t2)";
+    } else if(this.hover){ this.hover=null; c.style.cursor="default"; $("tip").style.display="none"; }
+  },
+  leave(){ this.hover=null; if(this.el)this.el.style.cursor="default"; $("tip").style.display="none"; },
+  click(){ const d=this.hover; if(d&&d.hit&&d.poemIdx>-1&&d.poemIdx<S.revealed){
+    const el=document.querySelector(`[data-poem="pf-${d.poemIdx}"]`); if(!el)return;
+    el.scrollIntoView({behavior:"smooth",block:"center"});
+    el.animate([{boxShadow:"0 0 0 2px rgba(232,177,94,.6)"},{boxShadow:"0 0 0 2px rgba(232,177,94,0)"}],{duration:1100,easing:"ease-out"});
+  }},
+};
+addEventListener("resize",()=>{ if(S.phase!=="idle"&&Dots.el) Dots.init(); });
+
+/* ═══ agent swarm panel (atmospheric, fed by real evidence fragments) ═══ */
+let agentTimer=null;
+function seedAgents(){ S.agents=[]; for(let i=0;i<15;i++) S.agents.push({id:"A"+String(i+1).padStart(2,"0"),frag:"—",readN:0,active:false,flash:0}); renderAgents(); }
+function pumpAgents(){
+  const active = S.phase==="dredge"||S.phase==="read";
+  S.agents = S.agents.map(a=>{
+    if(!active) return {...a,active:false,flash:Math.max(0,a.flash-1)};
+    const frag = S.fragPool.length? S.fragPool[Math.random()*S.fragPool.length|0] : a.frag;
+    const step = S.family==="scan" ? (6+Math.random()*22|0) : (1+Math.random()*4|0);
+    return {...a,frag,readN:a.readN+step,active:Math.random()<0.92,flash:Math.max(0,a.flash-1)};
+  });
+  renderAgents();
+}
+function agentFlash(){ // brief ✓ on a random active agent when a real hit lands
+  const idx = S.agents.findIndex(a=>a.active); const i = idx>=0? idx : (Math.random()*15|0);
+  if(S.agents[i]) S.agents[i].flash=3;
+}
+function renderAgents(){
+  $("swarmList").innerHTML = S.agents.map(a=>{
+    const flashing=a.flash>0, dot=flashing?"var(--amber)":(a.active?"var(--mint)":"#2a3140");
+    const glow=(a.active||flashing)?`box-shadow:0 0 6px ${flashing?"var(--amber)":"var(--mint)"}`:"";
+    const fcls = isCJK(a.frag)?"cjk":"la", fcol=a.active?"var(--t2)":"var(--t5)";
+    const rowbg = flashing?"rgba(232,177,94,.07)":(a.active?"rgba(94,230,196,.04)":"transparent");
+    return `<div class="arow" style="background:${rowbg}"><span class="ad" style="background:${dot};${glow}"></span>`+
+      `<span class="aid">${a.id}</span><span class="af ${fcls}" style="color:${fcol}">${esc(a.active?a.frag:"…")}</span>`+
+      `<span class="an">${a.readN?fmt(a.readN):"—"}</span><span class="ac" style="opacity:${flashing?1:0}">✓</span></div>`;
+  }).join("");
+}
+function pushFrag(lines){ (lines||[]).forEach(l=>{ const t=(l||"").trim(); if(t&&t.length>=2&&t.length<=40&&!S.fragPool.includes(t)) S.fragPool.push(t); });
+  if(S.fragPool.length>60) S.fragPool=S.fragPool.slice(-60); }
+seedAgents();
+
+/* ═══ status / phase ═══ */
+const STATUS = {idle:["var(--mint)","待命 READY"],parse:["var(--amber)","解析中 PARSING"],
+  dredge:["var(--amber)","打捞中 DREDGING"],read:["var(--amber)","通读中 READING"],done:["var(--mint)","完成 SETTLED"]};
+function setPhase(p){ S.phase=p; const [c,txt]=STATUS[p]||STATUS.idle;
+  $("lamp").style.background=c; $("lamp").style.boxShadow=`0 0 8px ${c}`; $("statusText").style.color=c; $("statusText").textContent=txt;
+  renderPipe(); }
+let clockTimer=null;
+function startClock(){ S.startTs=performance.now(); clockTimer=setInterval(()=>{ $("clock").textContent=((performance.now()-S.startTs)/1000).toFixed(2)+"s"; },80); }
+function stopClock(){ clearInterval(clockTimer); }
+
+/* pipeline — labels adapt to the mode family so we never claim a full read that didn't happen */
+function renderPipe(){
+  const fam=S.family;
+  const stages = fam==="scan"
+    ? [["01","解析意图",S.phase==="parse"?"理解中":"完成"],["02","排定阅读",S.cand?fmt(S.cand)+" 候选":"—"],["03","逐首通读",fmt(S.read)+" / "+fmt(S.readTotal)+" 首"],["04","呈现原典",S.revealed+" 命中"]]
+    : fam==="exact"
+    ? [["01","规范化",S.phase==="parse"?"折叠繁简":"完成"],["02","词对词匹配",S.cand?fmt(S.cand)+" 命中":"—"],["03","—","—"],["04","呈现原典",S.revealed+" 首"]]
+    : [["01","解析意图",S.phase==="parse"?"理解中":"完成"],["02","召回候选",S.cand?fmt(S.cand)+" 首":"—"],["03","蜂群精读",S.hits?S.hits+" 命中":"审读中"],["04","呈现原典",S.revealed+" 命中"]];
+  const order=["parse","dredge","read","done"]; const cur=order.indexOf(S.phase);
+  $("pipe").innerHTML = stages.map((s,i)=>{
+    const on=i===cur, done=i<cur, cls=on?"on":(done?"done":"");
+    return `<div class="pstep ${cls}"><span class="num">${s[0]}</span><span class="lbl">${s[1]}</span><span class="sub">${esc(s[2])}</span></div>`;
+  }).join("");
+}
+function renderTelemetry(){
+  const fam=S.family;
+  // read block: truthful only for scan; swarm/exact repurpose the labels
+  if(fam==="scan"){
+    $("telReadK").textContent="已通读"; $("telRead").textContent=fmt(S.read);
+    $("telReadSub").textContent=`/ ${fmt(S.readTotal)} 待读候选`;
+    $("telBar").style.width=(S.readTotal?Math.min(100,S.read/S.readTotal*100):0)+"%";
+    $("telCandK").textContent="候选打捞"; $("telCand").textContent=fmt(S.cand);
+    $("telHitsK").textContent="强命中"; $("telHits").textContent=S.hits;
+  } else if(fam==="exact"){
+    $("telReadK").textContent="词对词命中"; $("telRead").textContent=fmt(S.cand);
+    $("telReadSub").textContent="全文连续精确匹配"; $("telBar").style.width=S.cand?"100%":"0%";
+    $("telCandK").textContent="呈现"; $("telCand").textContent=S.revealed;
+    $("telHitsK").textContent="零 AI"; $("telHits").textContent="—";
+  } else {
+    $("telReadK").textContent="召回候选"; $("telRead").textContent=fmt(S.cand);
+    $("telReadSub").textContent="向量/字面全库召回 → 精读 30"; $("telBar").style.width=S.cand?"100%":"0%";
+    $("telCandK").textContent="候选"; $("telCand").textContent=fmt(S.cand);
+    $("telHitsK").textContent="命中"; $("telHits").textContent=S.revealed;
+  }
+}
+function setCanvasLabels(){
+  $("canvasLabel").innerHTML=`全库 ${fmt(S.corpus)} · <span style="color:var(--mint)">亮＝候选/已读</span> · <span style="color:var(--amber)">金环＝命中·可点击</span>`;
+  const map={parse:"解析中…",dredge:S.family==="scan"?"排定阅读…":"召回候选…",read:S.family==="scan"?"并行通读中…":"蜂群精读中…",done:"完成"};
+  $("canvasScan").textContent=map[S.phase]||"";
+}
+
+/* ═══ cards ═══ */
+const CLAMP=6, LONG=16;
+function poemBody(poem, evidence, domId){
+  const lines = (poem.full_text||"").split("\n");
+  const cjk = cjkLang(poem.language);
+  const evSet = (evidence||[]).map(e=>(e||"").trim()).filter(e=>e.length>=2);
+  const needsFold = lines.length>CLAMP, isLong=lines.length>LONG;
+  const render = (arr)=>arr.map(ln=>{
+    const hit = evSet.some(e=>ln.includes(e));
+    return `<div class="pl ${cjk?"cjk":"la"}${hit?" hit":""}">${esc(ln===""?" ":ln)}</div>`;
+  }).join("");
+  const bodyId=`body-${domId}`;
+  const vis = needsFold ? lines.slice(0,CLAMP) : lines;
+  let html = `<div class="poembody" id="${bodyId}" data-lines="${lines.length}">${render(vis)}</div>`;
+  if(needsFold){
+    const lbl = isLong?`▼ 展开全文（${lines.length} 行 · 面板内滚动）`:`▼ 展开全文（${lines.length} 行）`;
+    html += `<button class="foldbtn" data-body="${bodyId}" data-open="0" data-long="${isLong?1:0}"
+      data-full="${encodeURIComponent(render(lines))}" data-clamp="${encodeURIComponent(render(vis))}">${lbl}</button>`;
+  }
+  return html;
+}
+function cardHTML(v, poem, rank){
+  const cjk=cjkLang(poem.language), domId=`pf-${rank-1}`;
+  const meta=[poem.era,LANG[poem.language]||poem.language].filter(Boolean).join(" · ");
+  const tags=(v.matched_description_aspects||[]).filter(Boolean).map(t=>`<span class="ptag ${cjk?"cjk":"la"}">#${esc(t)}</span>`).join("");
+  const src = poem.source_url
+    ? `<a class="csrc" href="${esc(poem.source_url)}" target="_blank" rel="noopener"><span class="d"></span>${esc(poem.source_name||"")} · ${esc(poem.license||"")} ↗</a>`
+    : `<span class="csrc"><span class="d"></span>${esc(poem.source_name||"")} · ${esc(poem.license||"")}</span>`;
+  const why = v.explanation ? `<div class="why"><span class="k">为何命中 · </span><span class="b">${esc(v.explanation)}</span></div>` : "";
+  const pct = v.confidence!=null ? Math.round(v.confidence*100)+"%" : "";
+  return `<article class="card" data-poem="${domId}">
+    <div class="hd"><div class="rank">#${String(rank).padStart(2,"0")}</div>
+      <div class="ti"><h3>${esc(poem.title||"无题")}</h3><span class="au">${esc(poem.author||"佚名")}</span><span class="me">${esc(meta)}</span></div>
+      <div class="sc"><div class="p">${pct}</div><div class="l">匹配度</div></div></div>
+    ${poemBody(poem, v.evidence_lines, domId)}
+    ${why}
+    <div class="cfoot">${tags}${src}</div></article>`;
+}
+// fold toggle (delegated)
+document.addEventListener("click",e=>{
+  const b=e.target.closest(".foldbtn"); if(!b)return;
+  const body=$(b.dataset.body), open=b.dataset.open==="1", isLong=b.dataset.long==="1";
+  body.innerHTML=decodeURIComponent(open?b.dataset.clamp:b.dataset.full);
+  body.classList.toggle("scroll", !open && isLong);
+  b.dataset.open=open?"0":"1";
+  b.textContent = open ? (isLong?`▼ 展开全文（${body.dataset.lines} 行 · 面板内滚动）`:`▼ 展开全文（${body.dataset.lines} 行）`) : "▲ 收起";
+});
+function addCard(v, poem){
+  if(S.cardIds.has(poem.id)) return;
+  S.cardIds.add(poem.id); S.cards.push({verdict:v,poem});
+  $("reshd").style.display=""; $("cards").insertAdjacentHTML("beforeend", cardHTML(v,poem,S.cards.length));
+  S.revealed=S.cards.length; updateResCount();
+}
+function rebuildCards(list){ // authoritative final list (ranked) — replace progressive cards
+  S.cards=[]; S.cardIds=new Set();
+  $("cards").innerHTML = list.map((w,i)=>{ S.cardIds.add(w.poem.id); S.cards.push(w); return cardHTML(w.verdict,w.poem,i+1); }).join("")
+    || `<div class="empty">未捞到符合的诗，换个描述或检索方式再试。</div>`;
+  S.revealed=S.cards.length; $("reshd").style.display=list.length?"":"none"; updateResCount();
+}
+function updateResCount(){ $("resCount").textContent = S.phase==="done"
+  ? `共 ${S.cards.length} 首 · 按匹配度排序` : `涌现中… ${S.cards.length}`; }
+
+/* ═══ search / SSE ═══ */
+function startSearch(){
+  const q=$("q").value.trim(); if(!q)return;
+  if(S.es) S.es.close();
+  S.query=q; S.mode=$("modes").querySelector(".mcard.on")?.dataset.mode||S.mode; S.lang=$("lang").value; S.family=modeFamily(S.mode);
+  Object.assign(S,{cand:0,read:0,readTotal:0,hits:0,revealed:0,stopReason:"",cards:[],cardIds:new Set(),fragPool:[]});
+  $("idle").style.display="none"; $("view-browse").style.display="none"; $("view-thanks").style.display="none";
+  $("running").style.display=""; $("cards").innerHTML=""; $("intent").style.display="none"; $("reshd").style.display="none";
+  $("endnote").style.display="none"; $("stopbox").style.display="none"; $("qEcho").textContent=`「${q}」`;
+  $("reshd").querySelector(".k").textContent="命中原典";
+  $("body").classList.add("running");
+  seedAgents(); renderTelemetry(); Dots.init(); Dots.reset(); Dots.start();
+  if(!agentTimer) agentTimer=setInterval(pumpAgents,120);
+  startClock(); setPhase("parse"); setCanvasLabels();
+  $("swarmStatus").textContent = S.family==="exact"?"零 AI":"并行";
+  const url=`/api/search?retrieval=${S.mode}${S.lang?`&lang=${S.lang}`:""}&q=`+encodeURIComponent(q);
+  S._done=false;
+  S.es=new EventSource(url);
+  S.es.onmessage=ev=>handle(JSON.parse(ev.data));
+  S.es.onerror=()=>{ if(S.es){S.es.close();S.es=null;} finishRun(); };
+}
+function handle(m){
+  switch(m.type){
+    case "start": break;
+    case "understanding": setCanvasLabels(); break;
+    case "criteria": renderIntent(m.criteria); break;
+    case "candidates": S.cand=m.count; setPhase("dredge"); renderTelemetry(); renderPipe(); setCanvasLabels(); break;
+    case "retrieved": S.cand=m.count; Dots.litTarget=1; setPhase("read"); renderTelemetry(); renderPipe(); setCanvasLabels(); break;
+    case "exact_hits":
+      S.cand=m.count; Dots.litTarget=1; setPhase("read"); renderTelemetry(); renderPipe();
+      $("reshd").querySelector(".k").textContent="词对词命中";
+      break;
+    case "fragment_hits": break;
+    case "shortlist": pushFrag((m.cards||[]).map(c=>(c.preview||"").split("\n")[0])); renderTelemetry(); break;
+    case "swarm_dispatched": setPhase("read"); break;
+    case "scan_order": S.readTotal=m.total; setPhase("read"); renderTelemetry(); renderPipe(); setCanvasLabels(); break;
+    case "scan_wave":
+      S.read=m.read; S.readTotal=m.total; S.hits=m.strong;
+      Dots.litTarget = m.total? Math.min(1,m.read/m.total) : 0;
+      renderTelemetry(); renderPipe(); break;
+    case "scan_hit":
+      pushFrag(m.evidence); agentFlash();
+      if(m.poem) addCard({confidence:(m.score||0)/5, matched_description_aspects:m.label?[m.label]:[],
+        evidence_lines:m.evidence||[], explanation:""}, m.poem);
+      renderPipe(); break;
+    case "agent_start": break;
+    case "expert_hit": pushFrag(m.evidence); agentFlash(); break;
+    case "agent_done": break;
+    case "verdict": if(S.family!=="scan") addCard(m.verdict, m.poem); else { S._finalVerdicts=S._finalVerdicts||[]; S._finalVerdicts.push({verdict:m.verdict,poem:m.poem}); } break;
+    case "done": onDone(m); break;
+    case "error": break;
+  }
+}
+function renderIntent(criteria){
+  if(!criteria||!criteria.length) return;
+  $("intent").style.display="";
+  $("intent").innerHTML = `<span class="k">意图解析 →</span>` + criteria.map(c=>{
+    const col={emotion:"#ff6d8a",action:"#6da6ff",imagery:"var(--amber)",setting:"#6dffa6",sequence:"#b96dff"}[c.kind]||"var(--mint)";
+    const kn={emotion:"情感",action:"动作",imagery:"意象",setting:"场景",sequence:"时序"}[c.kind]||c.kind;
+    return `<span class="ichip"><span class="head" style="color:${col}">${esc(c.aspect)}</span><span class="exp">${esc(kn)}</span></span>`;
+  }).join("");
+}
+const REASON={satisfied:"读到满意即停",budget:"达阅读上限",diminishing:"收益递减停止",exhausted:"已读完候选",empty:"无候选"};
+function onDone(m){
+  // scan reveals its authoritative ranked verdicts here (progressive cards were a strong-hit subset)
+  if(S.family==="scan" && S._finalVerdicts){ rebuildCards(S._finalVerdicts.sort((a,b)=>(b.verdict.confidence||0)-(a.verdict.confidence||0))); S._finalVerdicts=null; }
+  else { S.cards.sort((a,b)=>(b.verdict.confidence||0)-(a.verdict.confidence||0)); rebuildCards(S.cards); }
+  if(m.read!=null){ S.read=m.read; S.readTotal=m.total; }
+  if(m.matched!=null && S.family==="scan") S.hits=Math.max(S.hits,0);
+  Dots.litTarget=1;
+  // stop condition text (honest, per mode)
+  let stop="";
+  if(S.family==="scan"){
+    const r=REASON[m.reason]||m.reason||"";
+    stop = `深扫：${r}。共读 ${fmt(m.read||S.read)} / ${fmt(m.total||S.readTotal)} 首全文，命中 ${m.matched||S.cards.length} 首。` +
+      (m.reason==="diminishing"||m.reason==="budget"?"库中或仍有相关诗，但已过最相关区段——非「库里没有」。":"");
+  } else if(S.family==="exact"){
+    stop = `严格全文：词对词连续精确命中 ${fmt(S.cand)} 首，呈现前 ${S.cards.length} 首。零 AI 判断。`;
+  } else {
+    stop = `已按相关度排序，从 ${fmt(S.cand)} 召回候选中精读，取前 ${S.cards.length} 首强命中呈现。`;
+  }
+  S.stopReason=stop; $("stopbox").style.display=""; $("stopText").textContent=stop;
+  renderTelemetry(); finishRun();
+}
+function finishRun(){
+  if(S.es){ S.es.close(); S.es=null; }  // stop the stream so EventSource can't reconnect & re-run
+  if(S._done) return; S._done=true;
+  setPhase("done"); stopClock(); renderPipe(); setCanvasLabels();
+  $("endnote").style.display=""; updateResCount();
+  $("swarmStatus").textContent="待命";
+  setTimeout(()=>{ S.agents.forEach(a=>a.active=false); renderAgents(); },400);
+  setTimeout(()=>Dots.stop(),1400);
 }
 $("go").onclick=startSearch;
 $("q").addEventListener("keydown",e=>{ if(e.key==="Enter") startSearch(); });
+$("reset").onclick=()=>{
+  if(S.es) S.es.close(); stopClock(); Dots.stop();
+  $("running").style.display="none"; $("idle").style.display=""; $("body").classList.remove("running");
+  setPhase("idle"); $("clock").textContent="00.00s"; $("q").focus();
+};
 
-/* ── browse ── */
-const browse={language:"",author:"",page:1,langs:[]};
+/* ═══ nav: search / browse / thanks ═══ */
 function showView(n){
-  for(const v of ["search","browse","thanks"]) $("view-"+v).style.display=n===v?"":"none";
-  for(const v of ["search","browse","thanks"]) $("tab-"+v).className=n===v?"on":"";
-  if(n==="browse") loadBrowse(); if(n==="thanks") loadThanks(); }
-$("tab-search").onclick=()=>showView("search"); $("tab-browse").onclick=()=>showView("browse");
+  S.view=n;
+  ["search","browse","thanks"].forEach(v=>$("tab-"+v).classList.toggle("on",v===n));
+  $("idle").style.display = n==="search" && S.phase==="idle" ? "" : "none";
+  $("running").style.display = n==="search" && S.phase!=="idle" ? "" : "none";
+  $("view-browse").style.display = n==="browse"?"":"none";
+  $("view-thanks").style.display = n==="thanks"?"":"none";
+  $("body").classList.toggle("running", n==="search" && S.phase!=="idle");
+  if(n==="browse") loadBrowse(); if(n==="thanks") loadThanks();
+}
+$("tab-search").onclick=()=>showView("search");
+$("tab-browse").onclick=()=>showView("browse");
 $("tab-thanks").onclick=()=>showView("thanks");
 
+/* ═══ browse + thanks ═══ */
+const browse={language:"",author:"",page:1,langs:[]};
 async function loadThanks(){
   const d=await fetch("/api/sources").then(r=>r.json());
-  $("thanksList").innerHTML=`<div class="hint mono" style="margin-bottom:10px">共 ${d.total} 首 · ${d.sources.length} 个语料源</div>`+
-    d.sources.map(s=>{
-      const link=s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.source)}</a>`:esc(s.source);
-      return `<div class="wcard"><div class="meta"><b>${link}</b> · ${s.count} 首 · ${s.languages.map(l=>LANG[l]||l).join("/")}</div>
-        <div class="src mono">license: ${esc(s.license)}</div></div>`;
+  $("thanksList").innerHTML=`<div class="hint" style="margin-bottom:10px">共 ${fmt(d.total)} 首 · ${d.sources.length} 个语料源</div>`+
+    d.sources.map(s=>{ const link=s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.source)}</a>`:esc(s.source);
+      return `<div class="card"><div class="cfoot"><b style="color:var(--title);font-family:var(--sans)">${link}</b>
+        <span class="ptag la">${fmt(s.count)} 首</span><span class="ptag la">${s.languages.map(l=>LANG[l]||l).join("/")}</span>
+        <span class="csrc"><span class="d"></span>license ${esc(s.license)}</span></div></div>`;
     }).join("");
 }
-function bcard(p){ const src=p.source_url?`<a href="${esc(p.source_url)}" target="_blank" rel="noopener">${esc(p.source_name)}</a>`:esc(p.source_name);
-  return `<div class="wcard"><div class="meta"><b>${esc(p.title||"无题")}</b> · ${esc(p.author||"佚名")} · ${esc(p.era||"")} · ${esc(LANG[p.language]||p.language)}</div>${poemBlock(p.full_text,[])}<div class="src mono">src ${src} · license ${esc(p.license)}</div></div>`; }
+function bcard(p){
+  const cjk=cjkLang(p.language), domId=`bp-${p.id}`;
+  const src=p.source_url?`<a class="csrc" href="${esc(p.source_url)}" target="_blank" rel="noopener"><span class="d"></span>${esc(p.source_name)} · ${esc(p.license)} ↗</a>`:`<span class="csrc"><span class="d"></span>${esc(p.source_name)} · ${esc(p.license)}</span>`;
+  const meta=[p.era,LANG[p.language]||p.language].filter(Boolean).join(" · ");
+  return `<article class="card"><div class="hd"><div class="ti"><h3>${esc(p.title||"无题")}</h3><span class="au">${esc(p.author||"佚名")}</span><span class="me">${esc(meta)}</span></div></div>
+    ${poemBody(p, [], domId)}<div class="cfoot">${src}</div></article>`;
+}
 async function loadBrowse(){
   const pr=new URLSearchParams({page:browse.page,page_size:20});
-  if(browse.language) pr.set("language",browse.language); if(browse.author) pr.set("author",browse.author);
+  if(browse.language)pr.set("language",browse.language); if(browse.author)pr.set("author",browse.author);
   const d=await fetch("/api/browse?"+pr).then(r=>r.json());
   if(!browse.langs.length){ const i=await fetch("/api/info").then(r=>r.json()); browse.langs=i.languages; }
   const all=[["","全部"]].concat(browse.langs.map(l=>[l,LANG[l]||l]));
@@ -276,12 +737,13 @@ async function loadBrowse(){
   document.querySelectorAll("#langChips .chip").forEach(b=>b.onclick=()=>{browse.language=b.dataset.l;browse.author="";browse.page=1;loadBrowse();});
   const sel=$("authorSel"); sel.innerHTML='<option value="">全部作者</option>'+d.authors.map(([a,n])=>`<option value="${esc(a)}"${a===browse.author?" selected":""}>${esc(a)} (${n})</option>`).join("");
   sel.onchange=()=>{browse.author=sel.value;browse.page=1;loadBrowse();};
-  $("browseTotal").textContent=`共 ${d.total} 首`;
+  $("browseTotal").textContent=`共 ${fmt(d.total)} 首`;
   $("browseList").innerHTML=d.poems.map(bcard).join("")||'<div class="empty">无</div>';
   const pages=Math.max(1,Math.ceil(d.total/d.page_size));
   $("pageInfo").textContent=`${d.page} / ${pages}`; $("prev").disabled=d.page<=1; $("next").disabled=d.page>=pages;
   $("prev").onclick=()=>{browse.page--;loadBrowse();scrollTo(0,0);}; $("next").onclick=()=>{browse.page++;loadBrowse();scrollTo(0,0);};
 }
+setPhase("idle");
 </script>
 </body>
 </html>

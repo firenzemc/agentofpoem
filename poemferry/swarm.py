@@ -418,7 +418,8 @@ async def _scan_pipeline(
                     strong.add(pid)
                     new_strong += 1
                     await emit({"type": "scan_hit", "poem_id": pid, "score": h["score"],
-                                "label": h["label"], "evidence": h["evidence_lines"]})
+                                "label": h["label"], "evidence": h["evidence_lines"],
+                                "poem": by_id[pid].model_dump()})
         no_new = 0 if new_strong else no_new + 1
         await emit({"type": "scan_wave", "read": read, "total": total, "strong": len(strong)})
 
