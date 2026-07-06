@@ -21,6 +21,7 @@ from poemferry.llm import chat_json, make_client  # noqa: E402
 
 CONCURRENCY = 48
 MAX_CHARS = 6000
+FLUSH_EVERY = 2000  # checkpoint interval: a 28h/363k run must survive interruption
 
 ENRICH_SYS = """You are an enrichment agent in a poetry indexing swarm. You receive \
 one poem in its original language. Produce compact English metadata covering the \
@@ -55,6 +56,12 @@ async def enrich_one(client, settings, sem, record: dict, usage: dict) -> None:
         except Exception as e:
             print(f"  ! {record['id']}: {e}")
             return
+        # v4-flash occasionally wraps the object in a JSON array; tolerate it
+        # instead of crashing the whole run.
+        if isinstance(data, list):
+            data = data[0] if data and isinstance(data[0], dict) else {}
+        if not isinstance(data, dict):
+            return
         gist = str(data.get("gist", "")).strip()
         if gist:
             record["enrichment"] = {
@@ -62,6 +69,14 @@ async def enrich_one(client, settings, sem, record: dict, usage: dict) -> None:
                 "gist": gist[:300],
                 "images": [str(x) for x in data.get("images", [])][:8],
             }
+
+
+def _checkpoint(path: Path, records: list[dict]) -> None:
+    tmp = path.with_suffix(".jsonl.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for r in records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    tmp.rename(path)
 
 
 async def enrich_file(client, settings, path: Path) -> None:
@@ -74,18 +89,17 @@ async def enrich_file(client, settings, path: Path) -> None:
     print(f"{path.name}: enriching {len(todo)}/{len(records)}")
     sem = asyncio.Semaphore(CONCURRENCY)
     usage: dict = {}
-    await asyncio.gather(*(enrich_one(client, settings, sem, r, usage) for r in todo))
-
-    tmp = path.with_suffix(".jsonl.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    tmp.rename(path)
-    done = sum(1 for r in records if r.get("enrichment"))
-    print(
-        f"{path.name}: {done}/{len(records)} enriched | "
-        f"tokens prompt={usage.get('prompt', 0):,} completion={usage.get('completion', 0):,}"
-    )
+    # Flush in chunks so an interrupted long run resumes (enrich_one is
+    # idempotent — a restart re-scans todo and skips what's already enriched).
+    for i in range(0, len(todo), FLUSH_EVERY):
+        chunk = todo[i : i + FLUSH_EVERY]
+        await asyncio.gather(*(enrich_one(client, settings, sem, r, usage) for r in chunk))
+        _checkpoint(path, records)
+        done = sum(1 for r in records if r.get("enrichment"))
+        print(
+            f"{path.name}: checkpoint {done}/{len(records)} | "
+            f"tokens prompt={usage.get('prompt', 0):,} completion={usage.get('completion', 0):,}"
+        )
 
 
 async def main() -> None:

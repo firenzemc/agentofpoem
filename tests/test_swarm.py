@@ -80,6 +80,17 @@ def test_vector_index_cosine_topk():
     assert res[0][0] == "a" and res[1][0] == "c"
 
 
+def test_vector_index_float16_chunked_matches_ranking(monkeypatch):
+    import poemferry.vectors as vectors
+    monkeypatch.setattr(vectors, "SEARCH_CHUNK", 2)  # force several blocks
+    ids = ["a", "b", "c", "d", "e"]
+    mat = np.array([[1, 0], [0.9, 0.1], [0.1, 0.9], [0, 1], [0.8, 0.2]], dtype=np.float32)
+    q = np.array([1, 0], dtype=np.float32)
+    want = [i for i, _ in VectorIndex(ids, mat).search_unique(q, k=5)]
+    got = [i for i, _ in VectorIndex(ids, mat.astype(np.float16)).search_unique(q, k=5)]
+    assert got == want
+
+
 # ── full pipeline (vector retrieval mocked via a tiny index) ──
 async def test_funnel_pipeline_runs_experts_and_aggregates(monkeypatch):
     monkeypatch.setattr(swarm, "understand_query", fake_understand)
@@ -154,3 +165,48 @@ async def test_fragment_channel_forces_into_shortlist(monkeypatch):
     assert any(e["type"] == "fragment_hits" and e["count"] == 1 for e in events)
     verdicts = [e for e in events if e["type"] == "verdict"]
     assert [v["poem"]["id"] for v in verdicts] == ["p1"]
+
+
+async def fake_expert_all(client, settings, criterion, query_lang, batch, usage=None):
+    return {p.id: {"evidence_lines": ["x"], "note": "hit"} for p in batch}
+
+
+async def test_lang_filter_restricts_corpus_to_one_language(monkeypatch):
+    monkeypatch.setattr(swarm, "understand_query", fake_understand)
+    monkeypatch.setattr(swarm, "expert_batch", fake_expert_all)
+    monkeypatch.setattr("poemferry.vectors.embed_query",
+                        lambda settings, text: np.array([1, 0], dtype=np.float32))
+
+    index = VectorIndex(["p1", "p2", "p3"],
+                        np.array([[1, 0], [0.9, 0.1], [0.8, 0.2]], dtype=np.float32))
+    settings = make_settings()
+    # Experts would hit every poem, but lang_filter="en" removes zh/fr from the pool.
+    events = [e async for e in swarm.search_stream(
+        None, settings, NaiveRetriever(), POEMS, "哭了之后喝酒",
+        doc_index=index, lang_filter="en")]
+    ids = {v["poem"]["id"] for v in events if v["type"] == "verdict"}
+    assert ids == {"p3"}
+
+
+async def test_exact_mode_literal_folded_and_lang_filtered():
+    from poemferry.fragments import FragmentIndex
+    poems = POEMS + [Poem(id="p4", title="T", author="W", language="zh",
+                          full_text="在天願作比翼鳥", source_name="s", license="PD")]
+    fi = FragmentIndex(poems)
+
+    async def run(q, **kw):
+        # client=None: if the exact branch wrongly called the LLM it would crash,
+        # proving the mode is zero-LLM.
+        return [e async for e in swarm.search_stream(
+            None, make_settings(), NaiveRetriever(), poems, q,
+            fragment_index=fi, retrieval_mode="exact", **kw)]
+
+    def verdict_ids(events):
+        return [e["poem"]["id"] for e in events if e["type"] == "verdict"]
+
+    ev = await run("愁肠")
+    assert verdict_ids(ev) == ["p1"] and any(e["type"] == "exact_hits" for e in ev)
+    # simplified query folds to hit the traditional poem
+    assert verdict_ids(await run("在天愿作比翼鸟")) == ["p4"]
+    # language filter drops matches in other languages
+    assert verdict_ids(await run("愁肠", lang_filter="en")) == []

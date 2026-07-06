@@ -30,3 +30,15 @@ class FragmentIndex:
         if not needles:
             return []
         return [pid for pid, text in self._entries if any(n in text for n in needles)]
+
+    def search_exact(self, query: str, min_len: int = 2) -> list[tuple[str, int]]:
+        """Strict word-for-word search: every poem whose normalized full text
+        contains the whole query as one contiguous substring, with occurrence
+        count, most-hits first. Zero LLM — pure literal matching (trad/simp folded
+        so a simplified query still hits a traditional poem)."""
+        needle = normalize(query)
+        if len(needle) < min_len:
+            return []
+        hits = [(pid, text.count(needle)) for pid, text in self._entries if needle in text]
+        hits.sort(key=lambda pc: -pc[1])
+        return hits

@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
 
 from .config import Settings
+from .fragments import FragmentIndex, normalize
 from .llm import chat_json, swarm_model
 from .models import Poem, Verdict
 from .retriever import Retriever
@@ -165,6 +166,10 @@ def _chunk(items: list, size: int, max_chunks: int) -> list[list]:
 RRF_K = 60
 RRF_WEIGHTS = {"image": 1.0, "keyword": 0.5, "concept": 0.7}
 
+# Widened per-channel fetch when a language filter narrows by_id: the indexes rank
+# over the full corpus, so a small top-k could yield too few in-language survivors.
+LANG_FILTER_FETCH = 5000
+
 
 def _round_robin(*ranked_lists) -> list[str]:
     """Interleave ranked id lists, deduped: each list's #1 first, then every #2, …
@@ -197,7 +202,7 @@ def _rrf_fuse(channels: list[tuple[float, list[str]]], k: int = RRF_K) -> list[s
 
 async def _retrieve(
     client, settings, intent, description, candidates, by_id,
-    doc_index, lexical_index, mode, usage, emit,
+    doc_index, lexical_index, mode, usage, emit, lang_filter=None,
 ) -> list[Poem]:
     """Layer 1 — narrow candidates to ~vec_topk. Modes:
     - image:   doc index (gist+themes+images) ranked by the English intent (semantic, cross-lingual).
@@ -210,19 +215,22 @@ async def _retrieve(
 
     intent_text = intent.get("intent_summary") or description
     k = settings.vec_topk
+    # When restricted to one language, fetch a wider slice from each full-corpus
+    # index so enough in-language hits survive the `pid in by_id` filter below.
+    fetch = k if not lang_filter else LANG_FILTER_FETCH
     try:
         doc_hits = lex_hits = []
         concept_lists: list = []
         if mode in ("image", "hybrid") and doc_index is not None:
             dvec = await asyncio.to_thread(embed_query, settings, intent_text)
-            doc_hits = doc_index.search_unique(dvec, k)
+            doc_hits = doc_index.search_unique(dvec, fetch)
         if mode in ("keyword", "hybrid") and lexical_index is not None:
-            lex_hits = lexical_index.search(description, k)
+            lex_hits = lexical_index.search(description, fetch)
         if mode in ("concept", "hybrid") and lexical_index is not None:
             expanded = intent.get("expanded") or {}
             # one ranked list per language → round-robin merge keeps languages balanced
             concept_lists = [
-                lexical_index.search(str(terms), k) for terms in expanded.values() if terms
+                lexical_index.search(str(terms), fetch) for terms in expanded.values() if terms
             ]
         if doc_hits or lex_hits or concept_lists:
             channels: list[tuple[float, list[str]]] = []
@@ -319,6 +327,7 @@ async def scan_batch(
 
 async def _reading_order(
     client, settings, intent, description, by_id, doc_index, lexical_index, usage, emit,
+    lang_filter=None,
 ) -> list[Poem]:
     """Full fused ranking (no trim) for scan mode. Spans every poem any channel
     surfaced. Un-embedded poems are ordered by lexical/concept signal only."""
@@ -326,6 +335,10 @@ async def _reading_order(
 
     intent_text = intent.get("intent_summary") or description
     k = settings.scan_order_size
+    # A language filter narrows by_id, so widen the fetch to keep the reading order
+    # deep enough within the one language.
+    if lang_filter:
+        k = max(k, LANG_FILTER_FETCH)
     try:
         doc_hits = lex_hits = []
         concept_lists: list = []
@@ -405,7 +418,8 @@ async def _scan_pipeline(
                     strong.add(pid)
                     new_strong += 1
                     await emit({"type": "scan_hit", "poem_id": pid, "score": h["score"],
-                                "label": h["label"], "evidence": h["evidence_lines"]})
+                                "label": h["label"], "evidence": h["evidence_lines"],
+                                "poem": by_id[pid].model_dump()})
         no_new = 0 if new_strong else no_new + 1
         await emit({"type": "scan_wave", "read": read, "total": total, "strong": len(strong)})
 
@@ -422,6 +436,47 @@ async def _scan_pipeline(
                 "usage": usage, "reason": reason, "read": read, "total": total})
 
 
+# ── exact mode: strict word-for-word full-text search, zero LLM ───────────────
+# Returns poems whose full text literally contains the WHOLE query as one contiguous
+# substring (normalized: whitespace/punctuation dropped, lowercased, trad→simp), most
+# occurrences first. No query understanding, no swarm — just the literal matches.
+
+EXACT_LIMIT = 60
+
+
+def _exact_evidence(poem: Poem, needle: str) -> list[str]:
+    lines = [ln for ln in poem.full_text.splitlines() if needle in normalize(ln)]
+    return lines or poem.full_text.splitlines()[:2]
+
+
+async def _exact_pipeline(description, poems, fragment_index, lang_filter, usage, emit) -> None:
+    if fragment_index is None:
+        fragment_index = FragmentIndex(poems)
+    hits = fragment_index.search_exact(description)
+    by_id = {p.id: p for p in poems}
+    needle = normalize(description)
+    verdicts: list[Verdict] = []
+    for pid, count in hits:
+        p = by_id.get(pid)
+        if p is None or (lang_filter and p.language != lang_filter):
+            continue
+        verdicts.append(Verdict(
+            poem_id=pid, match=True, confidence=1.0,
+            matched_description_aspects=[description.strip()],
+            evidence_lines=_exact_evidence(p, needle)[:6],
+            explanation=f"全文精确包含「{description.strip()}」（{count} 处）",
+            explanation_lang="",
+        ))
+        if len(verdicts) >= EXACT_LIMIT:
+            break
+    await emit({"type": "exact_hits", "count": len(hits), "shown": len(verdicts),
+                "ids": [v.poem_id for v in verdicts]})
+    for v in verdicts:
+        await emit({"type": "verdict", "verdict": v.model_dump(),
+                    "poem": by_id[v.poem_id].model_dump()})
+    await emit({"type": "done", "matched": len(verdicts), "usage": usage})
+
+
 async def search_stream(
     client: AsyncOpenAI,
     settings: Settings,
@@ -432,6 +487,7 @@ async def search_stream(
     doc_index=None,
     lexical_index=None,
     retrieval_mode: str | None = None,
+    lang_filter: str | None = None,
 ) -> AsyncIterator[dict]:
     """Funnel pipeline: retrieve (image/line/hybrid/scout) → trim → dynamic expert
     swarm → aggregate. Streams events for the live UI.
@@ -449,6 +505,9 @@ async def search_stream(
     async def pipeline() -> None:
         await emit({"type": "start", "description": description})
         usage: dict = {}
+        if mode == "exact":
+            await _exact_pipeline(description, poems, fragment_index, lang_filter, usage, emit)
+            return
         try:
             intent = await understand_query(client, settings, description, usage)
         except Exception as e:
@@ -462,7 +521,10 @@ async def search_stream(
         await emit({"type": "understanding", "intent": intent})
         await emit({"type": "criteria", "criteria": criteria})
 
-        candidates = retriever.retrieve(intent, poems)
+        # Explicit user filter (a testing knob) hard-restricts the corpus to one
+        # language, overriding the LLM's lang_hint.
+        pool = [p for p in poems if p.language == lang_filter] if lang_filter else poems
+        candidates = retriever.retrieve(intent, pool)
         by_id = {p.id: p for p in candidates}
         await emit({"type": "candidates", "count": len(candidates)})
         if not candidates:
@@ -480,7 +542,8 @@ async def search_stream(
 
         if mode == "scan":
             order = await _reading_order(
-                client, settings, intent, description, by_id, doc_index, lexical_index, usage, emit,
+                client, settings, intent, description, by_id, doc_index, lexical_index,
+                usage, emit, lang_filter,
             )
             await _scan_pipeline(
                 client, settings, intent, criteria, query_lang, order, forced, by_id, usage, emit,
@@ -489,7 +552,7 @@ async def search_stream(
 
         retrieved = await _retrieve(
             client, settings, intent, description, candidates, by_id,
-            doc_index, lexical_index, mode, usage, emit,
+            doc_index, lexical_index, mode, usage, emit, lang_filter,
         )
         await emit({"type": "retrieved", "count": len(retrieved), "mode": mode,
                     "ids": [p.id for p in retrieved]})
