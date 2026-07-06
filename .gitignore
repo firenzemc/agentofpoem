@@ -31,3 +31,6 @@ data/*.jsonl
 
 # local agent protocol — kept out of the public repo
 CLAUDE.md
+
+# design handoffs / binary artifacts — keep out of the repo
+*.zip
