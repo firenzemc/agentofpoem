@@ -40,6 +40,14 @@ async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/health")
+async def health() -> dict:
+    # FastAPI's lifespan blocks request serving until startup (index build) is
+    # done, so a plain 200 here already means the app is ready — the signal
+    # vinyard's deploy gate waits on.
+    return {"status": "ok"}
+
+
 @app.get("/api/info")
 async def info() -> dict:
     s = app.state.settings

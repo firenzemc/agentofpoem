@@ -11,3 +11,6 @@ plans
 # colbert spike cache (1.3GB) — not needed in prod image
 *.pkl
 staged
+
+# corpus + embedding index (~1.5GB): mounted as a named volume, never baked
+data
