@@ -47,8 +47,11 @@ def load_settings() -> Settings:
         shortlist_size=int(os.environ.get("SWARM_SHORTLIST", "240")),
         poems_path=os.environ.get("POEMS_PATH", "data"),
         retrieval_mode=os.environ.get("RETRIEVAL_MODE", "hybrid"),
-        embed_base_url=os.environ.get("EMBED_BASE_URL", "https://aihubmix.com/v1"),
-        embed_api_key=os.environ.get("EMBED_API_KEY", ""),
+        # Accept provider-named vars (AIHUBMIX_*) as aliases so the fleet's shared
+        # secrets.env naming works without a PoemFerry-specific rename.
+        embed_base_url=os.environ.get("EMBED_BASE_URL")
+        or os.environ.get("AIHUBMIX_BASE_URL", "https://aihubmix.com/v1"),
+        embed_api_key=os.environ.get("EMBED_API_KEY") or os.environ.get("AIHUBMIX_API_KEY", ""),
         embed_model=os.environ.get("EMBED_MODEL", "embed-v-4-0"),
         vec_topk=int(os.environ.get("VEC_TOPK", "80")),
         trim_topn=int(os.environ.get("TRIM_TOPN", "30")),
