@@ -7,24 +7,24 @@ health = "/health"
 # stripped /<name> path prefix → dedicated public port, not path routing.
 base_path_aware = false
 route = "port"
-port_public = 42077
+public_port = 42077            # NB: vin.py reads `public_port` (DEPLOY_CONTRACT.md's `port_public` is a doc typo)
 
 pinned = true                  # persistent real project, never auto-cleaned
 memory = "9g"                  # float16 doc index (~1.2GB) + lexical/fragment indices over the full corpus
 cpus = 4
 
-# Corpus + embedding index live in a named volume (portable via docker volume
-# export/import), NOT in git or the image. Must be pre-populated before first
-# deploy — see the deploy checklist.
-[[volumes]]
-name = "poemferry-data"
-mount = "/app/data"
-
 # Runtime secrets/config pulled by key from ~/vinyard/secrets.env (values never
 # here). The fleet's secrets use provider names; config.py reads AIHUBMIX_* as
 # the embed provider. Base URLs are injected so the app uses the shared endpoint,
-# not the built-in defaults.
+# not the built-in defaults. MUST stay above [[volumes]]: a top-level key placed
+# after a table header would be parsed into that table.
 env = ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "AIHUBMIX_API_KEY", "AIHUBMIX_BASE_URL"]
+
+# Corpus + embedding index live in a named volume (portable via docker volume
+# export/import), NOT in git or the image. Pre-populated before first deploy.
+[[volumes]]
+name = "poemferry-data"
+mount = "/app/data"
 
 [source]
 repo = "https://github.com/firenzemc/agentofpoem.git"
