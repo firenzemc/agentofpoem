@@ -1,0 +1,30 @@
+# vinyard deploy manifest — see http://<vinyard-ip>/spec/DEPLOY_CONTRACT.md
+name = "poemferry"
+port = 8000                    # the app listens here (Dockerfile CMD honors $PORT, default 8000)
+health = "/health"
+
+# PoemFerry emits absolute /static and /api URLs, so it can't live under a
+# stripped /<name> path prefix → dedicated public port, not path routing.
+base_path_aware = false
+route = "port"
+port_public = 42077
+
+pinned = true                  # persistent real project, never auto-cleaned
+memory = "9g"                  # float16 doc index (~1.2GB) + lexical/fragment indices over the full corpus
+cpus = 4
+
+# Corpus + embedding index live in a named volume (portable via docker volume
+# export/import), NOT in git or the image. Must be pre-populated before first
+# deploy — see the deploy checklist.
+[[volumes]]
+name = "poemferry-data"
+mount = "/app/data"
+
+# Runtime secrets pulled by key from ~/vinyard/secrets.env (values never here).
+# Only the two API keys are required; everything else has a default in config.py.
+# Add "GLM_API_KEY" only if SWARM_PROVIDER=glm.
+env = ["DEEPSEEK_API_KEY", "EMBED_API_KEY"]
+
+[source]
+repo = "https://github.com/firenzemc/agentofpoem.git"
+ref = "main"
