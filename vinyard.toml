@@ -8,14 +8,14 @@ health = "/health"
 route = "port"
 public_port = 42077
 
-# Startup builds lexical/fragment indices over the full corpus and loads a
-# ~1.25GB float16 vector index — ~2-3 min. Give the health gate room so it isn't
-# marked failed mid-warmup (will need raising further as the corpus grows).
-health_start = 20              # grace before the first probe
-health_retries = 120           # 120 x 2s = 240s gate
+# Startup builds lexical/fragment indices over the full 927k corpus and loads a
+# ~3GB float16 vector index — ~6-10 min. Give the health gate ample room so it
+# isn't marked failed mid-warmup.
+health_start = 30              # grace before the first probe
+health_retries = 360           # 360 x 2s = 720s (12 min) gate
 
 pinned = true                  # persistent real project, never auto-cleaned
-memory = "9g"                  # float16 doc index (~1.2GB) + lexical/fragment indices over the full corpus
+memory = "16g"                 # 3GB doc index + ~2GB lexical grams + 927k corpus objects
 cpus = 4
 
 # Runtime secrets/config pulled by key from ~/vinyard/secrets.env (values never

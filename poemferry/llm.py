@@ -26,14 +26,19 @@ async def chat_json(
     user: str,
     max_tokens: int = 2000,
     usage: dict | None = None,
+    response_format: dict | None = None,
+    extra_body: dict | None = None,
 ) -> dict:
     """Call the chat API in JSON mode and parse the response object.
 
     DeepSeek is OpenAI-compatible. v4-flash is a hybrid reasoning model; its
     reasoning lives in `reasoning_content`, while `content` holds the JSON.
     When a `usage` dict is given, token counts (incl. DeepSeek prefix-cache
-    hits) are accumulated into it.
+    hits) are accumulated into it. `response_format` defaults to json_object
+    (DeepSeek); pass a json_schema format for servers that require it (LM Studio).
+    `extra_body` passes provider-specific options (e.g. DeepSeek thinking toggle).
     """
+    fmt = response_format or {"type": "json_object"}
     # v4-flash occasionally returns truncated/invalid JSON even in json_object mode;
     # one malformed reply shouldn't abort a whole search. Retry a couple of times.
     last_err: Exception | None = None
@@ -44,9 +49,10 @@ async def chat_json(
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            response_format={"type": "json_object"},
+            response_format=fmt,
             temperature=0.2,
             max_tokens=max_tokens,
+            extra_body=extra_body,
         )
         if usage is not None and resp.usage:
             usage["prompt"] = usage.get("prompt", 0) + (resp.usage.prompt_tokens or 0)

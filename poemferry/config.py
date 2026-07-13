@@ -27,6 +27,15 @@ class Settings:
     glm_base_url: str
     glm_api_key: str
     glm_model: str
+    # "internal" (dark UI, all modes, no limits) vs "public" (light UI, scan
+    # disabled, rate-limited). One flag drives both theme and guards so the two
+    # deploys share one codebase off main.
+    profile: str = "internal"
+    # public-profile per-IP quotas (5min / hour / day) + a global daily backstop
+    rl_5min: int = 30
+    rl_hour: int = 200
+    rl_day: int = 1000
+    rl_global_day: int = 50000
     # scan mode: read full text in retrieval-order until satisfied (see swarm.scan_stream)
     scan_order_size: int = 1500
     scan_max_read: int = 768
@@ -60,6 +69,11 @@ def load_settings() -> Settings:
         glm_base_url=os.environ.get("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
         glm_api_key=os.environ.get("GLM_API_KEY", ""),
         glm_model=os.environ.get("GLM_MODEL", "glm-4.7-flash"),
+        profile=os.environ.get("POEMFERRY_PROFILE", "internal"),
+        rl_5min=int(os.environ.get("RL_5MIN", "30")),
+        rl_hour=int(os.environ.get("RL_HOUR", "200")),
+        rl_day=int(os.environ.get("RL_DAY", "1000")),
+        rl_global_day=int(os.environ.get("RL_GLOBAL_DAY", "50000")),
         scan_order_size=int(os.environ.get("SCAN_ORDER_SIZE", "1500")),
         scan_max_read=int(os.environ.get("SCAN_MAX_READ", "768")),
         scan_target_hits=int(os.environ.get("SCAN_TARGET_HITS", "12")),
