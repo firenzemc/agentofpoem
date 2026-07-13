@@ -61,6 +61,16 @@ Respond ONLY with JSON: {"hits": [{"poem_id": "...", "label": "...", \
 "evidence_lines": ["..."], "note": "..."}]}
 Include ONLY poems that satisfy THIS criterion (empty array if none)."""
 
+def _thinking_off(settings: Settings) -> dict | None:
+    """DeepSeek v4-flash thinks by default; for the swarm's small-max_tokens calls
+    the reasoning blows the token budget and truncates the JSON (understand_query
+    at max_tokens=900 emits 0 content → empty criteria). Disabling it is a strict
+    win here: correct output, ~4x fewer completion tokens, no quality loss. Only
+    DeepSeek understands the flag; leave GLM (the other provider) alone."""
+    use_glm = settings.swarm_provider == "glm" and settings.glm_api_key
+    return None if use_glm else {"thinking": {"type": "disabled"}}
+
+
 def _format_poem(p: Poem) -> str:
     head = f"[id={p.id}] {p.title or '(untitled)'} — {p.author or '(unknown)'} (lang={p.language})"
     return head + "\n" + p.full_text
@@ -71,7 +81,8 @@ async def understand_query(
 ) -> dict:
     user = f"User description:\n{description}"
     return await chat_json(
-        client, swarm_model(settings), UNDERSTAND_SYS, user, max_tokens=900, usage=usage
+        client, swarm_model(settings), UNDERSTAND_SYS, user, max_tokens=900, usage=usage,
+        extra_body=_thinking_off(settings),
     )
 
 
@@ -91,7 +102,8 @@ async def expert_batch(
         f"Candidate poems (keep original language):\n\n{poems_blob}"
     )
     data = await chat_json(
-        client, swarm_model(settings), EXPERT_SYS, user, max_tokens=2000, usage=usage
+        client, swarm_model(settings), EXPERT_SYS, user, max_tokens=2000, usage=usage,
+        extra_body=_thinking_off(settings),
     )
     ids = {p.id for p in batch}
     hits: dict[str, dict] = {}
@@ -305,7 +317,10 @@ async def scan_batch(
         f"query_lang: {query_lang}\n\n"
         f"Candidate poems (keep original language):\n\n{poems_blob}"
     )
-    data = await chat_json(client, swarm_model(settings), SCAN_SYS, user, max_tokens=2000, usage=usage)
+    data = await chat_json(
+        client, swarm_model(settings), SCAN_SYS, user, max_tokens=2000, usage=usage,
+        extra_body=_thinking_off(settings),
+    )
     ids = {p.id for p in batch}
     out: dict[str, dict] = {}
     for h in data.get("hits", []):
