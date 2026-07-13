@@ -15,7 +15,8 @@ health_start = 30              # grace before the first probe
 health_retries = 360           # 360 x 2s = 720s (12 min) gate
 
 pinned = true                  # persistent real project, never auto-cleaned
-memory = "16g"                 # 3GB doc index + ~2GB lexical grams + 927k corpus objects
+memory = "20g"                 # measured ~15.4G RSS: 2.85G doc index + ~7-9G lexical gram-sets
+                               # (927k) + ~3G corpus objects; 20g leaves headroom for search spikes
 cpus = 4
 
 # Runtime secrets/config pulled by key from ~/vinyard/secrets.env (values never
