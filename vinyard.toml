@@ -23,7 +23,11 @@ cpus = 4
 # here). The fleet's secrets use provider names; config.py reads AIHUBMIX_* as
 # the embed provider. Base URLs are injected so the app uses the shared endpoint.
 # MUST stay above [[volumes]]: a top-level key after a table header parses into it.
-env = ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "AIHUBMIX_API_KEY", "AIHUBMIX_BASE_URL"]
+# HTTP(S)_PROXY route aihubmix (embed) through the box's mihomo proxy — direct
+# egress to aihubmix.com is SNI-filtered on this network; NO_PROXY keeps DeepSeek
+# and the tailnet/localhost direct.
+env = ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "AIHUBMIX_API_KEY", "AIHUBMIX_BASE_URL",
+       "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]
 
 # Corpus + embedding index in a named volume (pre-populated out-of-band), never baked.
 [[volumes]]
